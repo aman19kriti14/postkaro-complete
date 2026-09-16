@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/Button";
-//import { useAuthStore } from "@/stores/auth.store";
 import axios from "axios";
 import { Logo } from "@/{api,components/{ui,guards},config,features/Logo";
 
@@ -40,8 +39,14 @@ interface ChannelOption {
 
 export function CreatePostPage() {
     const navigate = useNavigate();
-    //const user = useAuthStore((s) => s.user);
     const token = () => localStorage.getItem("pk_access_token");
+
+    // Draft being edited (opened from Drafts with ?draft=<id>)
+    const [searchParams] = useSearchParams();
+    const draftId = searchParams.get("draft");
+    const [loadingDraft, setLoadingDraft] = useState(!!draftId);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const [draftChannels, setDraftChannels] = useState<string[] | null>(null);
 
     // Form state
     const [prompt, setPrompt] = useState("");
@@ -108,6 +113,43 @@ export function CreatePostPage() {
         setScheduleDate(tomorrow.toISOString().split("T")[0] ?? "");
         setScheduleTime("11:30");
     }, []);
+
+    // Load an existing draft when opened from Drafts
+    useEffect(() => {
+        if (!draftId) return;
+        async function loadDraft() {
+            try {
+                const res = await axios.get(`${apiBase}/v1/posts/${draftId}`, {
+                    headers: { Authorization: `Bearer ${token()}` },
+                });
+                const p = res.data.data;
+                setPostId(p.id);
+                setPrompt(p.prompt ?? "");
+                setTone(p.tone ?? "warm");
+                setCaption(p.caption ?? "");
+                const first = p.media?.[0];
+                if (first?.url) {
+                    setMediaUrl(first.url);
+                    setMediaType(first.type === "video" ? "video" : "image");
+                }
+                setDraftChannels(p.channels ?? []);
+            } catch {
+                setLoadError("Couldn't open this draft. It may have been scheduled or deleted.");
+            } finally {
+                setLoadingDraft(false);
+            }
+        }
+        loadDraft();
+    }, [draftId]);
+
+    // Once channels and the draft are both loaded, select the draft's channels
+    useEffect(() => {
+        if (!draftChannels || channels.length === 0) return;
+        setChannels((prev) =>
+            prev.map((c) => ({ ...c, selected: draftChannels.includes(c.platform) }))
+        );
+        setDraftChannels(null); // apply once, then let the user change them
+    }, [draftChannels, channels.length]);
 
     const selectedChannels = channels.filter((c) => c.selected);
     const charCount = caption.length;
@@ -195,15 +237,33 @@ export function CreatePostPage() {
 
     // ─── Save / Schedule / Publish ─────────────────────────
 
+    // Creates the draft the first time, updates the same post after that
+    async function persistDraft(): Promise<string> {
+        const body = {
+            caption,
+            prompt,
+            tone,
+            channels: selectedChannels.map((c) => c.platform),
+            mediaUrl,
+            mediaType,
+        };
+        const headers = { Authorization: `Bearer ${token()}` };
+
+        if (postId) {
+            await axios.put(`${apiBase}/v1/posts/${postId}`, body, { headers });
+            return postId;
+        }
+
+        const res = await axios.post(`${apiBase}/v1/posts/draft`, body, { headers });
+        const id: string = res.data.data.id;
+        setPostId(id);
+        return id;
+    }
+
     async function handleSaveDraft() {
         setSaving(true);
         try {
-            const res = await axios.post(
-                `${apiBase}/v1/posts/draft`,
-                { caption, prompt, tone, channels: selectedChannels.map((c) => c.platform), mediaUrl, mediaType },
-                { headers: { Authorization: `Bearer ${token()}` } }
-            );
-            setPostId(res.data.data.id);
+            await persistDraft();
         } catch (err) {
             console.error("Save draft failed:", err);
         } finally {
@@ -214,16 +274,7 @@ export function CreatePostPage() {
     async function handleSchedule() {
         setScheduling(true);
         try {
-            let currentPostId = postId;
-            if (!currentPostId) {
-                const res = await axios.post(
-                    `${apiBase}/v1/posts/draft`,
-                    { caption, prompt, tone, channels: selectedChannels.map((c) => c.platform), mediaUrl, mediaType },
-                    { headers: { Authorization: `Bearer ${token()}` } }
-                );
-                currentPostId = res.data.data.id;
-                setPostId(currentPostId);
-            }
+            const currentPostId = await persistDraft();
 
             const scheduledAt = new Date(`${scheduleDate}T${scheduleTime}:00`).toISOString();
             await axios.post(
@@ -243,16 +294,7 @@ export function CreatePostPage() {
     async function handlePublishNow() {
         setPublishing(true);
         try {
-            let currentPostId = postId;
-            if (!currentPostId) {
-                const res = await axios.post(
-                    `${apiBase}/v1/posts/draft`,
-                    { caption, prompt, tone, channels: selectedChannels.map((c) => c.platform), mediaUrl, mediaType },
-                    { headers: { Authorization: `Bearer ${token()}` } }
-                );
-                currentPostId = res.data.data.id;
-                setPostId(currentPostId);
-            }
+            const currentPostId = await persistDraft();
 
             await axios.post(
                 `${apiBase}/v1/posts/${currentPostId}/publish`,
@@ -268,6 +310,30 @@ export function CreatePostPage() {
         }
     }
 
+    // ─── Draft loading states ──────────────────────────────
+
+    if (loadingDraft) {
+        return (
+            <div className="min-h-screen flex items-center justify-center text-sm text-neutral-500">
+                Opening draft…
+            </div>
+        );
+    }
+
+    if (loadError) {
+        return (
+            <div className="min-h-screen flex flex-col items-center justify-center gap-3 text-center px-6">
+                <p className="text-neutral-800">{loadError}</p>
+                <button
+                    onClick={() => navigate("/drafts")}
+                    className="text-sm text-primary-500 underline underline-offset-4"
+                >
+                    Back to drafts
+                </button>
+            </div>
+        );
+    }
+
     // ─── Render ────────────────────────────────────────────
 
     return (
@@ -277,7 +343,7 @@ export function CreatePostPage() {
                 <div className="flex items-center gap-4">
                     <Logo variant="light" height={28} markOnly />
                     <div>
-                        <h1 className="text-lg font-semibold text-neutral-900">New post</h1>
+                        <h1 className="text-lg font-semibold text-neutral-900">{draftId ? "Edit draft" : "New post"}</h1>
                         <p className="text-xs text-neutral-400">
                             {postId ? "Draft · saved" : "Draft · not saved yet"}
                         </p>
