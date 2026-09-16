@@ -1,0 +1,107 @@
+import { useEffect } from "react";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import {
+    LayoutDashboard, Calendar, Megaphone, FileText,
+    Sparkles, BarChart3, Settings, Plus, X,
+} from "lucide-react";
+import { Logo } from "../{ui,guards},config,features/Logo";
+import { useNavCounts, type NavCounts } from "./useNavCounts";
+
+type NavItem = {
+    path: string;
+    label: string;
+    icon: typeof LayoutDashboard;
+    count?: (c: NavCounts) => number;
+};
+
+const NAV_ITEMS: NavItem[] = [
+    { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { path: "/calendar", label: "Calendar", icon: Calendar, count: (c) => c.scheduled },
+    { path: "/campaigns", label: "Campaigns", icon: Megaphone },
+    { path: "/drafts", label: "Drafts", icon: FileText, count: (c) => c.drafts },
+    { path: "/ai-studio", label: "AI studio", icon: Sparkles },
+    { path: "/analytics", label: "Analytics", icon: BarChart3 },
+    { path: "/settings", label: "Settings", icon: Settings },
+];
+
+interface Props {
+    open: boolean;      // mobile drawer state
+    onClose: () => void;
+}
+
+export function Sidebar({ open, onClose }: Props) {
+    const navigate = useNavigate();
+    const { pathname } = useLocation();
+    const counts = useNavCounts();
+
+    // Close the mobile drawer after navigating
+    useEffect(() => { onClose(); }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    return (
+        <>
+            {/* Backdrop, mobile only */}
+            <div
+                onClick={onClose}
+                aria-hidden="true"
+                className={`fixed inset-0 z-30 bg-black/50 lg:hidden ${open ? "block" : "hidden"}`}
+            />
+
+            <aside
+                className={`fixed inset-y-0 left-0 z-40 flex w-[240px] flex-col bg-neutral-900 p-4 transition-transform motion-reduce:transition-none
+          lg:sticky lg:top-0 lg:h-screen lg:translate-x-0
+          ${open ? "translate-x-0" : "-translate-x-full"}`}
+            >
+                <div className="mb-6 flex items-center justify-between px-2">
+                    <Logo variant="dark" height={28} />
+                    <button
+                        onClick={onClose}
+                        aria-label="Close menu"
+                        className="p-1 text-neutral-400 hover:text-white lg:hidden"
+                    >
+                        <X className="h-5 w-5" />
+                    </button>
+                </div>
+
+                <button
+                    onClick={() => navigate("/create")}
+                    className="mb-6 flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-md)] border border-neutral-700 text-sm font-medium text-white transition-colors hover:bg-neutral-800 focus-visible:outline-2 focus-visible:outline-white"
+                >
+                    <Plus className="h-4 w-4" />
+                    Create post
+                </button>
+
+                <nav className="flex-1 space-y-1 overflow-y-auto">
+                    {NAV_ITEMS.map((item) => {
+                        const Icon = item.icon;
+                        const n = item.count && counts ? item.count(counts) : 0;
+
+                        return (
+                            <NavLink
+                                key={item.path}
+                                to={item.path}
+                                className={({ isActive }) =>
+                                    `flex w-full items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-white ${isActive
+                                        ? "bg-neutral-800 text-white"
+                                        : "text-neutral-400 hover:bg-neutral-800/50 hover:text-white"
+                                    }`
+                                }
+                            >
+                                {({ isActive }) => (
+                                    <>
+                                        <Icon className="h-[18px] w-[18px]" />
+                                        <span className="flex-1 text-left">{item.label}</span>
+                                        {n > 0 && (
+                                            <span className={`text-xs ${isActive ? "text-primary-400" : "text-primary-500"}`}>
+                                                {n}
+                                            </span>
+                                        )}
+                                    </>
+                                )}
+                            </NavLink>
+                        );
+                    })}
+                </nav>
+            </aside>
+        </>
+    );
+}
