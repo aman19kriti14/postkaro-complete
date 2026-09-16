@@ -2,25 +2,27 @@ import { useEffect } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
     LayoutDashboard, Calendar, Megaphone, FileText,
-    Sparkles, BarChart3, Settings, Plus, X,
+    Sparkles, BarChart3, Share2, Settings, Plus, X,
 } from "lucide-react";
 import { Logo } from "../{ui,guards},config,features/Logo";
-import { useNavCounts, type NavCounts } from "./useNavCounts";
+import { useSidebarCounts } from "@/features/Calendar/useSidebarCounts";
+import type { SidebarCounts } from "@/features/Calendar/api";
 
 type NavItem = {
     path: string;
     label: string;
     icon: typeof LayoutDashboard;
-    count?: (c: NavCounts) => number;
+    count?: (c: SidebarCounts) => number;
 };
 
 const NAV_ITEMS: NavItem[] = [
     { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { path: "/calendar", label: "Calendar", icon: Calendar, count: (c) => c.scheduled },
-    { path: "/campaigns", label: "Campaigns", icon: Megaphone },
+    { path: "/calendar", label: "Calendar", icon: Calendar, count: (c) => c.calendar },
+    { path: "/campaigns", label: "Campaigns", icon: Megaphone, count: (c) => c.campaigns },
     { path: "/drafts", label: "Drafts", icon: FileText, count: (c) => c.drafts },
     { path: "/ai-studio", label: "AI studio", icon: Sparkles },
     { path: "/analytics", label: "Analytics", icon: BarChart3 },
+    { path: "/social-accounts", label: "Social accounts", icon: Share2 },
     { path: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -32,7 +34,7 @@ interface Props {
 export function Sidebar({ open, onClose }: Props) {
     const navigate = useNavigate();
     const { pathname } = useLocation();
-    const counts = useNavCounts();
+    const counts = useSidebarCounts();
 
     // Close the mobile drawer after navigating
     useEffect(() => { onClose(); }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -7,11 +7,14 @@ import { ConnectAccountsPage } from "@/features/onboarding/pages/ConnectAccounts
 import { CreatePostPage } from "@/features/posts/pages/CreatePostPage";
 import DraftsPage from "@/features/drafts/DraftsPage";
 import CampaignsPage from "@/features/campaigns/CampaignsPage";
+import CalendarPage from "@/features/Calendar/CalendarPage";
 
 import { DashboardPage } from "@/features/dashboard/pages/DashboardPage";
 import { AppLayout } from "@/{api,components/layout/AppLayout";
-import NewCampaignPage from "@/features/campaigns/NewCampaignPage";
+import NewCampaignPage from "@/features/campaigns/NewCampaignPage"; CalendarPage
 import CampaignDetailPage from "@/features/campaigns/CampaignDetailPage";
+import StartCampaignPage from "@/features/campaigns/StartCampaignPage";
+import CampaignBuilderPage from "@/features/campaigns/CampaignBuilderPage";
 
 export const router = createBrowserRouter([
   {
@@ -27,16 +30,20 @@ export const router = createBrowserRouter([
       { path: "/onboarding", element: <OnboardingPage /> },
       { path: "/connect-accounts", element: <ConnectAccountsPage /> },
       { path: "/create", element: <CreatePostPage /> },
-      { path: "/create", element: <CreatePostPage /> },
-      { path: "/campaigns/new", element: <NewCampaignPage /> },
+      { path: "/campaigns/new", element: <StartCampaignPage /> },
+      { path: "/campaigns/start", element: <StartCampaignPage /> },
+      { path: "/campaigns/:id/build", element: <CampaignBuilderPage /> },
+      
+      
       {
         element: <AppLayout />,
         children: [
           { path: "/dashboard", element: <DashboardPage /> },
+          { path: "/calendar", element: <CalendarPage /> },
           { path: "/drafts", element: <DraftsPage /> },
           { path: "/campaigns", element: <CampaignsPage /> },
-
           { path: "/campaigns/:id", element: <CampaignDetailPage /> },
+          { path: "/campaigns/new", element: <NewCampaignPage /> },
 
         ],
       },
