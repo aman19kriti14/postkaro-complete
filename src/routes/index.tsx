@@ -8,13 +8,14 @@ import { CreatePostPage } from "@/features/posts/pages/CreatePostPage";
 import DraftsPage from "@/features/drafts/DraftsPage";
 import CampaignsPage from "@/features/campaigns/CampaignsPage";
 import CalendarPage from "@/features/Calendar/CalendarPage";
-
 import { DashboardPage } from "@/features/dashboard/pages/DashboardPage";
-import { AppLayout } from "@/{api,components/layout/AppLayout";
-import NewCampaignPage from "@/features/campaigns/NewCampaignPage"; CalendarPage
+
 import CampaignDetailPage from "@/features/campaigns/CampaignDetailPage";
 import StartCampaignPage from "@/features/campaigns/StartCampaignPage";
 import CampaignBuilderPage from "@/features/campaigns/CampaignBuilderPage";
+import { AiStudioPage } from "@/features/ai-studio/AiStudioPage";
+import { AppLayout } from "@/{api,components/layout/AppLayout";
+import { AnalyticsPage } from "@/features/analytics/AnalyticsPage";
 
 export const router = createBrowserRouter([
   {
@@ -27,14 +28,15 @@ export const router = createBrowserRouter([
   {
     element: <AuthGuard />,
     children: [
+      // Full-screen flows (no sidebar)
       { path: "/onboarding", element: <OnboardingPage /> },
       { path: "/connect-accounts", element: <ConnectAccountsPage /> },
       { path: "/create", element: <CreatePostPage /> },
       { path: "/campaigns/new", element: <StartCampaignPage /> },
       { path: "/campaigns/start", element: <StartCampaignPage /> },
       { path: "/campaigns/:id/build", element: <CampaignBuilderPage /> },
-      
-      
+
+      // Pages with the sidebar
       {
         element: <AppLayout />,
         children: [
@@ -43,8 +45,8 @@ export const router = createBrowserRouter([
           { path: "/drafts", element: <DraftsPage /> },
           { path: "/campaigns", element: <CampaignsPage /> },
           { path: "/campaigns/:id", element: <CampaignDetailPage /> },
-          { path: "/campaigns/new", element: <NewCampaignPage /> },
-
+          { path: "/ai-studio", element: <AiStudioPage /> },
+          { path: "/analytics", element: <AnalyticsPage /> },
         ],
       },
     ],

@@ -44,6 +44,7 @@ export function CreatePostPage() {
     // Draft being edited (opened from Drafts with ?draft=<id>)
     const [searchParams] = useSearchParams();
     const draftId = searchParams.get("draft");
+    const mode = searchParams.get("mode");
     const [loadingDraft, setLoadingDraft] = useState(!!draftId);
     const [loadError, setLoadError] = useState<string | null>(null);
     const [draftChannels, setDraftChannels] = useState<string[] | null>(null);
@@ -113,6 +114,12 @@ export function CreatePostPage() {
         setScheduleDate(tomorrow.toISOString().split("T")[0] ?? "");
         setScheduleTime("11:30");
     }, []);
+
+    // Opened from AI studio: preselect "Post now" or "Pick a slot"
+    useEffect(() => {
+        if (mode === "publish") setScheduleType("now");
+        else if (mode === "schedule") setScheduleType("pick");
+    }, [mode]);
 
     // Load an existing draft when opened from Drafts
     useEffect(() => {
