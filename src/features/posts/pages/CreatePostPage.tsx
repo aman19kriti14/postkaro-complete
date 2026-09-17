@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/Button";
 import axios from "axios";
+// ⚠️ use the same path AppLayout imports Logo from
+import { PosterEditor } from "@/features/poster/PosterEditor";
 import { Logo } from "@/{api,components/{ui,guards},config,features/Logo";
 
 const apiBase = import.meta.env.VITE_API_BASE_URL || "/api";
@@ -27,6 +29,9 @@ const REFINE_ACTIONS = [
     { key: "playful", label: "More playful" },
     { key: "hindi", label: "Translate to Hindi" },
 ];
+
+const tileClass =
+    "w-[140px] h-[140px] rounded-[var(--radius-md)] border border-dashed border-neutral-300 flex flex-col items-center justify-center text-neutral-400 cursor-pointer hover:border-primary-400 hover:bg-primary-50/30 hover:text-primary-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
 
 interface ChannelOption {
     id: string;
@@ -62,6 +67,7 @@ export function CreatePostPage() {
     // Media state
     const [mediaUrl, setMediaUrl] = useState<string | null>(null);
     const [mediaType, setMediaType] = useState<string | null>(null);
+    const [posterOpen, setPosterOpen] = useState(false);
 
     // Loading states
     const [generating, setGenerating] = useState(false);
@@ -152,9 +158,7 @@ export function CreatePostPage() {
     // Once channels and the draft are both loaded, select the draft's channels
     useEffect(() => {
         if (!draftChannels || channels.length === 0) return;
-        setChannels((prev) =>
-            prev.map((c) => ({ ...c, selected: draftChannels.includes(c.platform) }))
-        );
+        setChannels((prev) => prev.map((c) => ({ ...c, selected: draftChannels.includes(c.platform) })));
         setDraftChannels(null); // apply once, then let the user change them
     }, [draftChannels, channels.length]);
 
@@ -163,9 +167,7 @@ export function CreatePostPage() {
     const firstChannel = selectedChannels.length > 0 ? selectedChannels[0]! : null;
 
     function toggleChannel(id: string) {
-        setChannels((prev) =>
-            prev.map((c) => (c.id === id ? { ...c, selected: !c.selected } : c))
-        );
+        setChannels((prev) => prev.map((c) => (c.id === id ? { ...c, selected: !c.selected } : c)));
     }
 
     // ─── AI Caption ────────────────────────────────────────
@@ -177,7 +179,7 @@ export function CreatePostPage() {
             const res = await axios.post(
                 `${apiBase}/v1/posts/generate-caption`,
                 { caption, prompt, tone, channels: selectedChannels.map((c) => c.platform), mediaUrl, mediaType },
-                { headers: { Authorization: `Bearer ${token()}` } }
+                { headers: { Authorization: `Bearer ${token()}` } },
             );
             setCaption(res.data.data.caption);
         } catch (err) {
@@ -194,7 +196,7 @@ export function CreatePostPage() {
             const res = await axios.post(
                 `${apiBase}/v1/posts/refine-caption`,
                 { caption, action },
-                { headers: { Authorization: `Bearer ${token()}` } }
+                { headers: { Authorization: `Bearer ${token()}` } },
             );
             setCaption(res.data.data.caption);
         } catch (err) {
@@ -213,7 +215,7 @@ export function CreatePostPage() {
             const res = await axios.post(
                 `${apiBase}/v1/posts/generate-image`,
                 { prompt: prompt.trim(), size: "square" },
-                { headers: { Authorization: `Bearer ${token()}` } }
+                { headers: { Authorization: `Bearer ${token()}` } },
             );
             setMediaUrl(res.data.data.url);
             setMediaType("image");
@@ -231,7 +233,7 @@ export function CreatePostPage() {
             const res = await axios.post(
                 `${apiBase}/v1/posts/generate-video`,
                 { prompt: prompt.trim() },
-                { headers: { Authorization: `Bearer ${token()}` } }
+                { headers: { Authorization: `Bearer ${token()}` } },
             );
             setMediaUrl(res.data.data.url);
             setMediaType("video");
@@ -287,7 +289,7 @@ export function CreatePostPage() {
             await axios.post(
                 `${apiBase}/v1/posts/${currentPostId}/schedule`,
                 { scheduledAt },
-                { headers: { Authorization: `Bearer ${token()}` } }
+                { headers: { Authorization: `Bearer ${token()}` } },
             );
 
             navigate("/dashboard");
@@ -303,11 +305,9 @@ export function CreatePostPage() {
         try {
             const currentPostId = await persistDraft();
 
-            await axios.post(
-                `${apiBase}/v1/posts/${currentPostId}/publish`,
-                null,
-                { headers: { Authorization: `Bearer ${token()}` } }
-            );
+            await axios.post(`${apiBase}/v1/posts/${currentPostId}/publish`, null, {
+                headers: { Authorization: `Bearer ${token()}` },
+            });
 
             navigate("/dashboard");
         } catch (err) {
@@ -351,9 +351,7 @@ export function CreatePostPage() {
                     <Logo variant="light" height={28} markOnly />
                     <div>
                         <h1 className="text-lg font-semibold text-neutral-900">{draftId ? "Edit draft" : "New post"}</h1>
-                        <p className="text-xs text-neutral-400">
-                            {postId ? "Draft · saved" : "Draft · not saved yet"}
-                        </p>
+                        <p className="text-xs text-neutral-400">{postId ? "Draft · saved" : "Draft · not saved yet"}</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -399,11 +397,15 @@ export function CreatePostPage() {
                         <div className="space-y-4">
                             <div className="flex items-center justify-between">
                                 <h2 className="text-xl font-[var(--font-display)] text-neutral-900">Write with AI</h2>
-                                <span className="text-xs font-semibold tracking-[0.1em] uppercase text-primary-500">Step 1</span>
+                                <span className="text-xs font-semibold tracking-[0.1em] uppercase text-primary-500">
+                                    Step 1
+                                </span>
                             </div>
 
                             <div>
-                                <label className="text-sm font-medium text-neutral-700 block mb-1.5">What is this post about?</label>
+                                <label className="text-sm font-medium text-neutral-700 block mb-1.5">
+                                    What is this post about?
+                                </label>
                                 <textarea
                                     value={prompt}
                                     onChange={(e) => setPrompt(e.target.value)}
@@ -420,8 +422,8 @@ export function CreatePostPage() {
                                             key={t.value}
                                             onClick={() => setTone(t.value)}
                                             className={`px-4 py-2 rounded-[var(--radius-md)] text-sm font-medium border transition-colors cursor-pointer ${tone === t.value
-                                                ? "border-primary-500 text-primary-500 bg-primary-50"
-                                                : "border-neutral-200 text-neutral-600 hover:border-neutral-300"
+                                                    ? "border-primary-500 text-primary-500 bg-primary-50"
+                                                    : "border-neutral-200 text-neutral-600 hover:border-neutral-300"
                                                 }`}
                                         >
                                             {t.label}
@@ -430,7 +432,12 @@ export function CreatePostPage() {
                                 </div>
                             </div>
 
-                            <Button variant="outline" onClick={handleGenerate} isLoading={generating} disabled={!prompt.trim()}>
+                            <Button
+                                variant="outline"
+                                onClick={handleGenerate}
+                                isLoading={generating}
+                                disabled={!prompt.trim()}
+                            >
                                 {generating ? "Generating…" : "Generate caption"}
                             </Button>
                         </div>
@@ -476,7 +483,10 @@ export function CreatePostPage() {
                                         <video src={mediaUrl} className="w-full h-full object-cover" controls />
                                     )}
                                     <button
-                                        onClick={() => { setMediaUrl(null); setMediaType(null); }}
+                                        onClick={() => {
+                                            setMediaUrl(null);
+                                            setMediaType(null);
+                                        }}
                                         className="absolute top-2 right-2 w-6 h-6 bg-black/50 rounded-full flex items-center justify-center text-white text-xs cursor-pointer hover:bg-black/70"
                                     >
                                         ✕
@@ -484,11 +494,11 @@ export function CreatePostPage() {
                                 </div>
                             )}
 
-                            <div className="flex gap-3">
+                            <div className="flex flex-wrap gap-3">
                                 <button
                                     onClick={handleGenerateImage}
                                     disabled={generatingImage || !prompt.trim()}
-                                    className="w-[140px] h-[140px] rounded-[var(--radius-md)] border border-dashed border-neutral-300 flex flex-col items-center justify-center text-neutral-400 cursor-pointer hover:border-primary-400 hover:bg-primary-50/30 hover:text-primary-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className={tileClass}
                                 >
                                     <svg className="w-6 h-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
@@ -499,12 +509,19 @@ export function CreatePostPage() {
                                 <button
                                     onClick={handleGenerateVideo}
                                     disabled={generatingVideo || !prompt.trim()}
-                                    className="w-[140px] h-[140px] rounded-[var(--radius-md)] border border-dashed border-neutral-300 flex flex-col items-center justify-center text-neutral-400 cursor-pointer hover:border-primary-400 hover:bg-primary-50/30 hover:text-primary-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className={tileClass}
                                 >
                                     <svg className="w-6 h-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
                                     </svg>
                                     <span className="text-xs font-medium">{generatingVideo ? "Generating…" : "AI video"}</span>
+                                </button>
+
+                                <button onClick={() => setPosterOpen(true)} className={tileClass}>
+                                    <svg className="w-6 h-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm3 10h10M7 12h6M7 8h8" />
+                                    </svg>
+                                    <span className="text-xs font-medium">Poster</span>
                                 </button>
 
                                 <label className="w-[140px] h-[140px] rounded-[var(--radius-md)] border border-dashed border-neutral-300 flex flex-col items-center justify-center text-neutral-400 cursor-pointer hover:border-neutral-400 hover:bg-neutral-50 transition-colors">
@@ -527,8 +544,8 @@ export function CreatePostPage() {
                                         key={opt.value}
                                         onClick={() => setScheduleType(opt.value)}
                                         className={`px-5 py-2 rounded-[var(--radius-md)] text-sm font-medium border transition-colors cursor-pointer ${scheduleType === opt.value
-                                            ? "border-primary-500 text-primary-500 bg-primary-50"
-                                            : "border-neutral-200 text-neutral-600 hover:border-neutral-300"
+                                                ? "border-primary-500 text-primary-500 bg-primary-50"
+                                                : "border-neutral-200 text-neutral-600 hover:border-neutral-300"
                                             }`}
                                     >
                                         {opt.label}
@@ -593,12 +610,14 @@ export function CreatePostPage() {
                                         key={ch.id}
                                         onClick={() => toggleChannel(ch.id)}
                                         className={`w-full flex items-center gap-3 p-3 rounded-[var(--radius-md)] border transition-colors cursor-pointer text-left ${ch.selected
-                                            ? "border-primary-500 bg-primary-50/30"
-                                            : "border-neutral-200 hover:border-neutral-300"
+                                                ? "border-primary-500 bg-primary-50/30"
+                                                : "border-neutral-200 hover:border-neutral-300"
                                             }`}
                                     >
                                         <div
-                                            className={`w-10 h-10 rounded-[var(--radius-sm)] border flex items-center justify-center text-sm font-semibold shrink-0 ${ch.selected ? "border-primary-500 text-primary-500" : "border-neutral-200 text-neutral-500"
+                                            className={`w-10 h-10 rounded-[var(--radius-sm)] border flex items-center justify-center text-sm font-semibold shrink-0 ${ch.selected
+                                                    ? "border-primary-500 text-primary-500"
+                                                    : "border-neutral-200 text-neutral-500"
                                                 }`}
                                         >
                                             {ch.letter}
@@ -656,6 +675,18 @@ export function CreatePostPage() {
                     )}
                 </div>
             </div>
+
+            {/* Poster editor */}
+            <PosterEditor
+                open={posterOpen}
+                backgroundUrl={mediaType === "image" ? mediaUrl : null}
+                initialHeadline={prompt}
+                onClose={() => setPosterOpen(false)}
+                onUse={(url) => {
+                    setMediaUrl(url);
+                    setMediaType("image");
+                }}
+            />
         </div>
     );
 }

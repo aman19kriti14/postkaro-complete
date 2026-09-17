@@ -22,7 +22,7 @@ const NAV_ITEMS: NavItem[] = [
     { path: "/drafts", label: "Drafts", icon: FileText, count: (c) => c.drafts },
     { path: "/ai-studio", label: "AI studio", icon: Sparkles },
     { path: "/analytics", label: "Analytics", icon: BarChart3 },
-    { path: "/social-accounts", label: "Social accounts", icon: Share2 },
+   // { path: "/social-accounts", label: "Social accounts", icon: Share2 },
     { path: "/settings", label: "Settings", icon: Settings },
 ];
 
