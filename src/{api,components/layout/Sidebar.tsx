@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
     LayoutDashboard, Calendar, Megaphone, FileText,
-    Sparkles, BarChart3, Share2, Settings, Plus, X,
+    Sparkles, BarChart3,Settings, Plus, X,
 } from "lucide-react";
 import { Logo } from "../{ui,guards},config,features/Logo";
 import { useSidebarCounts } from "@/features/Calendar/useSidebarCounts";
