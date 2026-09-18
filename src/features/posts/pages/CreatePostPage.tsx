@@ -4,9 +4,9 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import axios from "axios";
 import { PosterEditor } from "@/features/poster/PosterEditor";
-import { Logo } from "@/{api,components/{ui,guards},config,features/Logo";
-import { LanguageCode, LANGUAGES } from "./languages";
 
+import { type LanguageCode, LANGUAGES } from "./languages";
+import { Logo } from "@/{api,components/{ui,guards},config,features/Logo";
 
 const apiBase = import.meta.env.VITE_API_BASE_URL || "/api";
 
@@ -68,6 +68,7 @@ export function CreatePostPage() {
     // Media state
     const [mediaUrl, setMediaUrl] = useState<string | null>(null);
     const [mediaType, setMediaType] = useState<string | null>(null);
+    const [imagePrompt, setImagePrompt] = useState("");
     const [posterOpen, setPosterOpen] = useState(false);
 
     // Loading states
@@ -219,12 +220,13 @@ export function CreatePostPage() {
     // ─── AI Media ──────────────────────────────────────────
 
     async function handleGenerateImage() {
-        if (!prompt.trim()) return;
+        const brief = imagePrompt.trim() || prompt.trim();
+        if (!brief) return;
         setGeneratingImage(true);
         try {
             const res = await axios.post(
                 `${apiBase}/v1/posts/generate-image`,
-                { prompt: prompt.trim(), size: "square" },
+                { prompt: brief, size: "square" },
                 { headers: { Authorization: `Bearer ${token()}` } },
             );
             setMediaUrl(res.data.data.url);
@@ -501,6 +503,21 @@ export function CreatePostPage() {
                         <div className="space-y-4">
                             <h2 className="text-xl font-[var(--font-display)] text-neutral-900">Media</h2>
 
+                            <div>
+                                <label className="text-sm font-medium text-neutral-700 block mb-1.5">
+                                    Describe the image <span className="text-neutral-400">(optional)</span>
+                                </label>
+                                <textarea
+                                    value={imagePrompt}
+                                    onChange={(e) => setImagePrompt(e.target.value)}
+                                    placeholder={prompt.trim() || "Filter coffee on a banana leaf, shot from above, soft morning light"}
+                                    className="w-full min-h-[70px] px-3 py-2.5 rounded-[var(--radius-md)] border border-neutral-200 bg-white text-sm text-neutral-800 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent resize-vertical"
+                                />
+                                <p className="mt-1.5 text-xs text-neutral-400">
+                                    Leave blank to use the post brief. Say what should be in the shot, the angle, and the light.
+                                </p>
+                            </div>
+
                             {mediaUrl && (
                                 <div className="relative w-[280px] h-[280px] rounded-[var(--radius-md)] overflow-hidden border border-neutral-200">
                                     {mediaType === "image" ? (
@@ -517,13 +534,22 @@ export function CreatePostPage() {
                                     >
                                         ✕
                                     </button>
+                                    {mediaType === "image" && (
+                                        <button
+                                            onClick={handleGenerateImage}
+                                            disabled={generatingImage}
+                                            className="absolute bottom-2 right-2 px-3 py-1.5 rounded-[var(--radius-sm)] bg-black/60 text-xs font-medium text-white cursor-pointer hover:bg-black/80 disabled:opacity-50"
+                                        >
+                                            {generatingImage ? "Generating…" : "Regenerate"}
+                                        </button>
+                                    )}
                                 </div>
                             )}
 
                             <div className="flex flex-wrap gap-3">
                                 <button
                                     onClick={handleGenerateImage}
-                                    disabled={generatingImage || !prompt.trim()}
+                                    disabled={generatingImage || (!imagePrompt.trim() && !prompt.trim())}
                                     className={tileClass}
                                 >
                                     <svg className="w-6 h-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
