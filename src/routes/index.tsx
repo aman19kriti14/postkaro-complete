@@ -26,26 +26,27 @@ export const router = createBrowserRouter([
       { path: "/signin", element: <SigninPage /> },
     ],
   },
+
   {
     element: <AuthGuard />,
     children: [
-      // Full-screen flows (no sidebar)
+      // Signup flow only — no sidebar by design
       { path: "/onboarding", element: <OnboardingPage /> },
       { path: "/connect-accounts", element: <ConnectAccountsPage /> },
-      { path: "/create", element: <CreatePostPage /> },
-      { path: "/campaigns/new", element: <StartCampaignPage /> },
-      { path: "/campaigns/start", element: <StartCampaignPage /> },
-      { path: "/campaigns/:id/build", element: <CampaignBuilderPage /> },
 
-      // Pages with the sidebar
+      // Everything else
       {
         element: <AppLayout />,
         children: [
           { path: "/dashboard", element: <DashboardPage /> },
           { path: "/calendar", element: <CalendarPage /> },
           { path: "/drafts", element: <DraftsPage /> },
+          { path: "/create", element: <CreatePostPage /> },
           { path: "/campaigns", element: <CampaignsPage /> },
+          { path: "/campaigns/new", element: <StartCampaignPage /> },
+          { path: "/campaigns/start", element: <StartCampaignPage /> },
           { path: "/campaigns/:id", element: <CampaignDetailPage /> },
+          { path: "/campaigns/:id/build", element: <CampaignBuilderPage /> },
           { path: "/ai-studio", element: <AiStudioPage /> },
           { path: "/analytics", element: <AnalyticsPage /> },
           { path: "/settings", element: <SettingsPage /> },

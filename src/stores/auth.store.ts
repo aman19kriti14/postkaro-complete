@@ -85,7 +85,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signout: async () => {
-    try { await authApi.signout(); } catch { /* best-effort */ } finally {
+    const refreshToken = tokenStore.getRefresh();
+    try {
+      if (refreshToken) await authApi.signout(refreshToken);
+    } catch { /* best-effort */ } finally {
       tokenStore.clear();
       set({ user: null, isAuthenticated: false });
     }

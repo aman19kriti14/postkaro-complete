@@ -11,8 +11,8 @@ export const authApi = {
   signin(data: SigninRequest) {
     return api.post<ApiResponse<AuthResponse>>(`${AUTH_BASE}/signin`, data);
   },
-  signout() {
-    return api.post<ApiResponse<null>>(`${AUTH_BASE}/signout`);
+  signout(refreshToken: string) {
+    return api.post<ApiResponse<null>>(`${AUTH_BASE}/logout`, { refreshToken });
   },
   me() {
     return api.get<ApiResponse<User>>(`${AUTH_BASE}/me`);

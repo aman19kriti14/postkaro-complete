@@ -2,11 +2,14 @@ import { useEffect } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
     LayoutDashboard, Calendar, Megaphone, FileText,
-    Sparkles, BarChart3,Settings, Plus, X,
+    Sparkles, BarChart3, Settings, Plus, X, LogOut,
 } from "lucide-react";
-import { Logo } from "../{ui,guards},config,features/Logo";
+
 import { useSidebarCounts } from "@/features/Calendar/useSidebarCounts";
+
 import type { SidebarCounts } from "@/features/Calendar/api";
+import { useAuthStore } from "@/stores/auth.store";
+import { Logo } from "../{ui,guards},config,features/Logo";
 
 type NavItem = {
     path: string;
@@ -22,7 +25,7 @@ const NAV_ITEMS: NavItem[] = [
     { path: "/drafts", label: "Drafts", icon: FileText, count: (c) => c.drafts },
     { path: "/ai-studio", label: "AI studio", icon: Sparkles },
     { path: "/analytics", label: "Analytics", icon: BarChart3 },
-   // { path: "/social-accounts", label: "Social accounts", icon: Share2 },
+    // { path: "/social-accounts", label: "Social accounts", icon: Share2 },
     { path: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -36,8 +39,23 @@ export function Sidebar({ open, onClose }: Props) {
     const { pathname } = useLocation();
     const counts = useSidebarCounts();
 
+    const user = useAuthStore((s) => s.user);
+    const signout = useAuthStore((s) => s.signout);
+
     // Close the mobile drawer after navigating
     useEffect(() => { onClose(); }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const handleSignout = async () => {
+        await signout();
+        navigate("/signin", { replace: true });
+    };
+
+    const initials = (user?.fullName ?? "")
+        .trim()
+        .split(/\s+/)
+        .slice(0, 2)
+        .map((w) => w[0]?.toUpperCase() ?? "")
+        .join("");
 
     return (
         <>
@@ -103,6 +121,26 @@ export function Sidebar({ open, onClose }: Props) {
                         );
                     })}
                 </nav>
+
+                <div className="mt-4 flex items-center gap-3 border-t border-neutral-800 pt-4">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#C8102E] text-xs font-semibold text-white">
+                        {initials || "?"}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-white">
+                            {user?.fullName ?? "—"}
+                        </p>
+                        <p className="truncate text-xs text-neutral-500">{user?.email}</p>
+                    </div>
+                    <button
+                        onClick={handleSignout}
+                        aria-label="Sign out"
+                        title="Sign out"
+                        className="shrink-0 cursor-pointer rounded-[var(--radius-md)] p-2 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-[#C8102E] focus-visible:outline-2 focus-visible:outline-white"
+                    >
+                        <LogOut className="h-[18px] w-[18px]" />
+                    </button>
+                </div>
             </aside>
         </>
     );

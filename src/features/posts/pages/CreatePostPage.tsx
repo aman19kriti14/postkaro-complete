@@ -3,9 +3,10 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/Button";
 import axios from "axios";
-// ⚠️ use the same path AppLayout imports Logo from
 import { PosterEditor } from "@/features/poster/PosterEditor";
 import { Logo } from "@/{api,components/{ui,guards},config,features/Logo";
+import { LanguageCode, LANGUAGES } from "./languages";
+
 
 const apiBase = import.meta.env.VITE_API_BASE_URL || "/api";
 
@@ -27,7 +28,6 @@ const REFINE_ACTIONS = [
     { key: "shorter", label: "Make it shorter" },
     { key: "hashtags", label: "Add hashtags" },
     { key: "playful", label: "More playful" },
-    { key: "hindi", label: "Translate to Hindi" },
 ];
 
 const tileClass =
@@ -57,6 +57,7 @@ export function CreatePostPage() {
     // Form state
     const [prompt, setPrompt] = useState("");
     const [tone, setTone] = useState("warm");
+    const [language, setLanguage] = useState<LanguageCode>("ENGLISH");
     const [caption, setCaption] = useState("");
     const [channels, setChannels] = useState<ChannelOption[]>([]);
     const [scheduleType, setScheduleType] = useState("best");
@@ -139,6 +140,7 @@ export function CreatePostPage() {
                 setPostId(p.id);
                 setPrompt(p.prompt ?? "");
                 setTone(p.tone ?? "warm");
+                setLanguage((p.language as LanguageCode) ?? "ENGLISH");
                 setCaption(p.caption ?? "");
                 const first = p.media?.[0];
                 if (first?.url) {
@@ -178,7 +180,15 @@ export function CreatePostPage() {
         try {
             const res = await axios.post(
                 `${apiBase}/v1/posts/generate-caption`,
-                { caption, prompt, tone, channels: selectedChannels.map((c) => c.platform), mediaUrl, mediaType },
+                {
+                    caption,
+                    prompt,
+                    tone,
+                    language,
+                    channels: selectedChannels.map((c) => c.platform),
+                    mediaUrl,
+                    mediaType,
+                },
                 { headers: { Authorization: `Bearer ${token()}` } },
             );
             setCaption(res.data.data.caption);
@@ -195,7 +205,7 @@ export function CreatePostPage() {
         try {
             const res = await axios.post(
                 `${apiBase}/v1/posts/refine-caption`,
-                { caption, action },
+                { caption, action, language },
                 { headers: { Authorization: `Bearer ${token()}` } },
             );
             setCaption(res.data.data.caption);
@@ -252,6 +262,7 @@ export function CreatePostPage() {
             caption,
             prompt,
             tone,
+            language,
             channels: selectedChannels.map((c) => c.platform),
             mediaUrl,
             mediaType,
@@ -415,6 +426,21 @@ export function CreatePostPage() {
                             </div>
 
                             <div>
+                                <label className="text-sm font-medium text-neutral-700 block mb-1.5">Language</label>
+                                <select
+                                    value={language}
+                                    onChange={(e) => setLanguage(e.target.value as LanguageCode)}
+                                    className="w-full h-11 px-3 rounded-[var(--radius-md)] border border-neutral-200 bg-white text-sm text-neutral-800 focus:outline-none focus:ring-2 focus:ring-primary-400 cursor-pointer"
+                                >
+                                    {LANGUAGES.map((l) => (
+                                        <option key={l.code} value={l.code}>
+                                            {l.label === l.native ? l.label : `${l.label} · ${l.native}`}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
                                 <label className="text-sm font-medium text-neutral-700 block mb-2">Tone</label>
                                 <div className="flex flex-wrap gap-2">
                                     {TONES.map((t) => (
@@ -422,8 +448,8 @@ export function CreatePostPage() {
                                             key={t.value}
                                             onClick={() => setTone(t.value)}
                                             className={`px-4 py-2 rounded-[var(--radius-md)] text-sm font-medium border transition-colors cursor-pointer ${tone === t.value
-                                                    ? "border-primary-500 text-primary-500 bg-primary-50"
-                                                    : "border-neutral-200 text-neutral-600 hover:border-neutral-300"
+                                                ? "border-primary-500 text-primary-500 bg-primary-50"
+                                                : "border-neutral-200 text-neutral-600 hover:border-neutral-300"
                                                 }`}
                                         >
                                             {t.label}
@@ -544,8 +570,8 @@ export function CreatePostPage() {
                                         key={opt.value}
                                         onClick={() => setScheduleType(opt.value)}
                                         className={`px-5 py-2 rounded-[var(--radius-md)] text-sm font-medium border transition-colors cursor-pointer ${scheduleType === opt.value
-                                                ? "border-primary-500 text-primary-500 bg-primary-50"
-                                                : "border-neutral-200 text-neutral-600 hover:border-neutral-300"
+                                            ? "border-primary-500 text-primary-500 bg-primary-50"
+                                            : "border-neutral-200 text-neutral-600 hover:border-neutral-300"
                                             }`}
                                     >
                                         {opt.label}
@@ -610,14 +636,14 @@ export function CreatePostPage() {
                                         key={ch.id}
                                         onClick={() => toggleChannel(ch.id)}
                                         className={`w-full flex items-center gap-3 p-3 rounded-[var(--radius-md)] border transition-colors cursor-pointer text-left ${ch.selected
-                                                ? "border-primary-500 bg-primary-50/30"
-                                                : "border-neutral-200 hover:border-neutral-300"
+                                            ? "border-primary-500 bg-primary-50/30"
+                                            : "border-neutral-200 hover:border-neutral-300"
                                             }`}
                                     >
                                         <div
                                             className={`w-10 h-10 rounded-[var(--radius-sm)] border flex items-center justify-center text-sm font-semibold shrink-0 ${ch.selected
-                                                    ? "border-primary-500 text-primary-500"
-                                                    : "border-neutral-200 text-neutral-500"
+                                                ? "border-primary-500 text-primary-500"
+                                                : "border-neutral-200 text-neutral-500"
                                                 }`}
                                         >
                                             {ch.letter}
@@ -681,6 +707,7 @@ export function CreatePostPage() {
                 open={posterOpen}
                 backgroundUrl={mediaType === "image" ? mediaUrl : null}
                 initialHeadline={prompt}
+                language={language}
                 onClose={() => setPosterOpen(false)}
                 onUse={(url) => {
                     setMediaUrl(url);

@@ -19,6 +19,26 @@ export interface PosterBrand {
     bodyFont: string | null;
 }
 
+export type BlockKey = "headline" | "subline" | "cta";
+
+/** Position overrides, as fractions of canvas width/height. Top-left of the block. */
+export type PosterPositions = Partial<Record<BlockKey, { x: number; y: number }>>;
+
+export interface BlockRect {
+    key: BlockKey;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    /** the x actually passed to fillText — differs from x when centre-aligned */
+    anchorX: number;
+}
+
+export interface RenderResult {
+    warning: string | null;
+    rects: BlockRect[];
+}
+
 export interface PosterSpec {
     size: PosterSize;
     layout: LayoutKey;
@@ -28,6 +48,10 @@ export interface PosterSpec {
     cta: string;
     showLogo: boolean;
     brand: PosterBrand;
+    /** Noto family for the selected script; null for Latin */
+    scriptFont?: string | null;
+    /** user-dragged overrides; blocks not listed keep flowing from the layout */
+    positions?: PosterPositions;
 }
 
 // ---------- image loading (cached) ----------
@@ -52,8 +76,8 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 
 // ---------- main ----------
 
-/** Draws the poster onto the canvas. Returns a warning message if something was skipped. */
-export async function renderPoster(canvas: HTMLCanvasElement, spec: PosterSpec): Promise<string | null> {
+/** Draws the poster. Returns any warning plus the on-canvas rect of each text block. */
+export async function renderPoster(canvas: HTMLCanvasElement, spec: PosterSpec): Promise<RenderResult> {
     const { w, h } = SIZES[spec.size];
     const layout: Layout = LAYOUTS.find((l) => l.key === spec.layout) ?? LAYOUTS[0]!;
     const palette = paletteFrom(spec.brand.colors);
@@ -103,8 +127,11 @@ export async function renderPoster(canvas: HTMLCanvasElement, spec: PosterSpec):
         w: layout.textBox.w * w,
         h: layout.textBox.h * h,
     };
-    const headingFont = (size: number) => `700 ${size}px ${fontStack(spec.brand.headingFont, "serif")}`;
-    const bodyFont = (size: number) => `400 ${size}px ${fontStack(spec.brand.bodyFont, "sans-serif")}`;
+
+    // Indic glyphs come from Noto, Latin in the same line stays in the brand font
+    const script = spec.scriptFont ? `"${spec.scriptFont}", ` : "";
+    const headingFont = (size: number) => `700 ${size}px ${script}${fontStack(spec.brand.headingFont, "serif")}`;
+    const bodyFont = (size: number) => `400 ${size}px ${script}${fontStack(spec.brand.bodyFont, "sans-serif")}`;
 
     const headline = spec.headline.trim();
     const subline = spec.subline.trim();
@@ -129,7 +156,7 @@ export async function renderPoster(canvas: HTMLCanvasElement, spec: PosterSpec):
 
     const blockH = head.lines.length * headLH + gap1 + subLines.length * subLH + gap2 + ctaH;
 
-    let y =
+    const y0 =
         layout.anchor === "top"
             ? box.y
             : layout.anchor === "bottom"
@@ -147,50 +174,99 @@ export async function renderPoster(canvas: HTMLCanvasElement, spec: PosterSpec):
         ctx.shadowBlur = 12;
     }
 
-    ctx.font = headingFont(head.size);
-    for (const line of head.lines) {
-        ctx.fillText(line, x, y);
-        y += headLH;
-    }
-    y += gap1;
+    const rects: BlockRect[] = [];
+    const pos = spec.positions ?? {};
 
-    ctx.font = bodyFont(subSize);
-    ctx.globalAlpha = 0.92;
-    for (const line of subLines) {
-        ctx.fillText(line, x, y);
-        y += subLH;
+    // where each block would sit if it just flowed from the layout
+    const flow: Record<BlockKey, { x: number; y: number }> = {
+        headline: { x, y: y0 },
+        subline: { x, y: y0 + head.lines.length * headLH + gap1 },
+        cta: { x, y: y0 + head.lines.length * headLH + gap1 + subLines.length * subLH + gap2 },
+    };
+
+    const placed = (key: BlockKey) => {
+        const o = pos[key];
+        return o ? { x: o.x * w, y: o.y * h } : flow[key];
+    };
+
+    // ---- headline ----
+    if (head.lines.length) {
+        const p = placed("headline");
+        ctx.font = headingFont(head.size);
+        let ly = p.y;
+        let widest = 0;
+        for (const line of head.lines) {
+            ctx.fillText(line, p.x, ly);
+            widest = Math.max(widest, ctx.measureText(line).width);
+            ly += headLH;
+        }
+        rects.push({
+            key: "headline",
+            x: layout.align === "center" ? p.x - widest / 2 : p.x,
+            y: p.y,
+            w: widest,
+            h: head.lines.length * headLH,
+            anchorX: p.x,
+        });
     }
-    ctx.globalAlpha = 1;
+
+    // ---- subline ----
+    if (subLines.length) {
+        const p = placed("subline");
+        ctx.font = bodyFont(subSize);
+        ctx.globalAlpha = 0.92;
+        let ly = p.y;
+        let widest = 0;
+        for (const line of subLines) {
+            ctx.fillText(line, p.x, ly);
+            widest = Math.max(widest, ctx.measureText(line).width);
+            ly += subLH;
+        }
+        ctx.globalAlpha = 1;
+        rects.push({
+            key: "subline",
+            x: layout.align === "center" ? p.x - widest / 2 : p.x,
+            y: p.y,
+            w: widest,
+            h: subLines.length * subLH,
+            anchorX: p.x,
+        });
+    }
+
     ctx.shadowColor = "transparent";
     ctx.shadowBlur = 0;
-    y += gap2;
 
     // ---- CTA button ----
     if (cta) {
-        ctx.font = `600 ${ctaSize}px ${fontStack(spec.brand.bodyFont, "sans-serif")}`;
+        const p = placed("cta");
+        ctx.font = `600 ${ctaSize}px ${script}${fontStack(spec.brand.bodyFont, "sans-serif")}`;
         const label = truncate(ctx, cta, box.w - ctaSize * 2);
         const bw = ctx.measureText(label).width + ctaSize * 2;
-        const bx = layout.align === "center" ? x - bw / 2 : x;
+        const bx = layout.align === "center" ? p.x - bw / 2 : p.x;
         // on the colour panel, the accent button would vanish; use the dark colour instead
         const btn = layout.panel ? palette.dark : palette.accent;
         ctx.fillStyle = btn;
-        roundRect(ctx, bx, y, bw, ctaH, ctaH / 2);
+        roundRect(ctx, bx, p.y, bw, ctaH, ctaH / 2);
         ctx.fill();
         ctx.fillStyle = textOn(btn);
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(label, bx + bw / 2, y + ctaH / 2 + 1);
+        ctx.fillText(label, bx + bw / 2, p.y + ctaH / 2 + 1);
+        // restore, the logo draw follows
+        ctx.textAlign = layout.align;
+        ctx.textBaseline = "top";
+        ctx.fillStyle = textColor;
+        rects.push({ key: "cta", x: bx, y: p.y, w: bw, h: ctaH, anchorX: p.x });
     }
 
     // ---- logo ----
     if (logo) drawLogo(ctx, logo, layout.logo, w, h);
 
-    return warning;
+    return { warning, rects };
 }
 
 // ---------- export ----------
 
-/** PNG blob of the current canvas. Fails if an image was loaded without CORS. */
 /** JPEG blob of the current canvas (Instagram only accepts JPEG). */
 export function exportPoster(canvas: HTMLCanvasElement): Promise<Blob> {
     return new Promise((resolve, reject) => {
@@ -259,9 +335,11 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
     ctx.closePath();
 }
 
+/** Grapheme-aware: popping bare code points would break Indic clusters. */
 function truncate(ctx: CanvasRenderingContext2D, text: string, maxW: number): string {
     if (ctx.measureText(text).width <= maxW) return text;
-    const chars = Array.from(text);
+    const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    const chars = Array.from(seg.segment(text), (s) => s.segment);
     while (chars.length > 1 && ctx.measureText(chars.join("") + "…").width > maxW) chars.pop();
     return chars.join("") + "…";
 }

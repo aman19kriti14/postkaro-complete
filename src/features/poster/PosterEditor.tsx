@@ -1,11 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import axios from "axios";
-import { X, Loader2 } from "lucide-react";
+import { X, Loader2, Sparkles, RotateCcw } from "lucide-react";
 import { tokenStore } from "@/api/client";
 import { env } from "@/config/env";
 import { settingsApi } from "@/features/settings/api";
 import { LAYOUTS, SIZES, type LayoutKey, type PosterSize } from "./layouts";
-import { renderPoster, exportPoster, type PosterBrand } from "./renderPoster";
+import { loadFontForLanguage } from "./fonts";
+
+import {
+    renderPoster,
+    exportPoster,
+    type PosterBrand,
+    type BlockRect,
+    type BlockKey,
+    type PosterPositions,
+} from "./renderPoster";
+import { LanguageCode } from "../posts/pages/languages";
 
 interface Props {
     open: boolean;
@@ -13,6 +23,8 @@ interface Props {
     backgroundUrl: string | null;
     /** prefill for the headline, e.g. the post prompt */
     initialHeadline?: string;
+    /** language for AI copy and script font */
+    language?: LanguageCode;
     onClose: () => void;
     /** called with the uploaded poster URL */
     onUse: (url: string) => void;
@@ -38,7 +50,14 @@ async function uploadPoster(blob: Blob): Promise<string> {
     return body.url as string;
 }
 
-export function PosterEditor({ open, backgroundUrl, initialHeadline = "", onClose, onUse }: Props) {
+export function PosterEditor({
+    open,
+    backgroundUrl,
+    initialHeadline = "",
+    language = "ENGLISH",
+    onClose,
+    onUse,
+}: Props) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
 
     const [brand, setBrand] = useState<PosterBrand | null>(null);
@@ -50,10 +69,19 @@ export function PosterEditor({ open, backgroundUrl, initialHeadline = "", onClos
     const [cta, setCta] = useState("");
     const [showLogo, setShowLogo] = useState(true);
 
+    const [scriptFont, setScriptFont] = useState<string | null>(null);
+    const [positions, setPositions] = useState<PosterPositions>({});
+    const [writing, setWriting] = useState(false);
+
     const [rendering, setRendering] = useState(false);
     const [saving, setSaving] = useState(false);
     const [warning, setWarning] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+
+    // block rects from the last render, for hit-testing drags
+    const rectsRef = useRef<BlockRect[]>([]);
+    const dragRef = useRef<{ key: BlockKey; dxFrac: number; dyFrac: number } | null>(null);
+    const [dragging, setDragging] = useState<BlockKey | null>(null);
 
     // brand settings (fonts, colours, logo)
     useEffect(() => {
@@ -66,13 +94,30 @@ export function PosterEditor({ open, backgroundUrl, initialHeadline = "", onClos
             .catch(() => setBrand({ logoUrl: null, colors: [], headingFont: null, bodyFont: null }));
     }, [open, brand]);
 
+    // load the Noto face for the selected script before drawing
+    useEffect(() => {
+        if (!open) return;
+        let cancelled = false;
+        loadFontForLanguage(language)
+            .then((f) => !cancelled && setScriptFont(f))
+            .catch(() => !cancelled && setScriptFont(null));
+        return () => {
+            cancelled = true;
+        };
+    }, [open, language]);
+
+    // changing size or layout invalidates dragged positions
+    useEffect(() => {
+        setPositions({});
+    }, [size, layout]);
+
     // redraw shortly after the user stops typing
     useEffect(() => {
         if (!open || !brand || !canvasRef.current) return;
         const t = setTimeout(async () => {
             setRendering(true);
             try {
-                const w = await renderPoster(canvasRef.current!, {
+                const res = await renderPoster(canvasRef.current!, {
                     size,
                     layout,
                     backgroundUrl: usePhoto ? backgroundUrl : null,
@@ -81,16 +126,19 @@ export function PosterEditor({ open, backgroundUrl, initialHeadline = "", onClos
                     cta,
                     showLogo,
                     brand,
+                    scriptFont,
+                    positions,
                 });
-                setWarning(w);
+                rectsRef.current = res.rects;
+                setWarning(res.warning);
             } catch (e: any) {
                 setError(e?.message ?? "Couldn't draw the poster");
             } finally {
                 setRendering(false);
             }
-        }, 250);
+        }, dragging ? 0 : 250);
         return () => clearTimeout(t);
-    }, [open, brand, size, layout, usePhoto, backgroundUrl, headline, subline, cta, showLogo]);
+    }, [open, brand, size, layout, usePhoto, backgroundUrl, headline, subline, cta, showLogo, scriptFont, positions, dragging]);
 
     // close on Escape
     useEffect(() => {
@@ -103,6 +151,83 @@ export function PosterEditor({ open, backgroundUrl, initialHeadline = "", onClos
     if (!open) return null;
 
     const canUse = !!brand && !rendering && !saving && (headline.trim() || subline.trim());
+
+    // ---- AI copy ----
+
+    const writeCopy = async () => {
+        if (!headline.trim() && !initialHeadline.trim()) return;
+        setWriting(true);
+        setError(null);
+        try {
+            const res = await axios.post(
+                `${env.API_BASE_URL}/v1/posts/generate-poster-copy`,
+                { topic: headline.trim() || initialHeadline.trim(), language },
+                { headers: { Authorization: `Bearer ${tokenStore.getAccess() ?? ""}` } },
+            );
+            const copy = res.data?.data ?? res.data;
+            if (copy.headline) setHeadline(copy.headline.slice(0, 80));
+            if (copy.subhead) setSubline(copy.subhead.slice(0, 140));
+            if (copy.cta) setCta(copy.cta.slice(0, 30));
+            setPositions({}); // new text lengths make old positions meaningless
+        } catch (e: any) {
+            setError(e?.response?.data?.message ?? "Couldn't write the copy. Try again.");
+        } finally {
+            setWriting(false);
+        }
+    };
+
+    // ---- dragging ----
+
+    /** pointer position as a fraction of the canvas, accounting for CSS scaling */
+    const pointerFrac = (e: React.PointerEvent<HTMLCanvasElement>) => {
+        const el = e.currentTarget;
+        const r = el.getBoundingClientRect();
+        return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+    };
+
+    const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const f = pointerFrac(e);
+        const px = f.x * canvas.width;
+        const py = f.y * canvas.height;
+
+        // last drawn wins, so the topmost block is picked up
+        const hit = [...rectsRef.current]
+            .reverse()
+            .find((r) => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h);
+        if (!hit) return;
+
+        e.currentTarget.setPointerCapture(e.pointerId);
+        dragRef.current = {
+            key: hit.key,
+            dxFrac: f.x - hit.anchorX / canvas.width,
+            dyFrac: f.y - hit.y / canvas.height,
+        };
+        setDragging(hit.key);
+    };
+
+    const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+        const d = dragRef.current;
+        if (!d) return;
+        const f = pointerFrac(e);
+        setPositions((prev) => ({
+            ...prev,
+            [d.key]: {
+                x: Math.min(1, Math.max(0, f.x - d.dxFrac)),
+                y: Math.min(1, Math.max(0, f.y - d.dyFrac)),
+            },
+        }));
+    };
+
+    const endDrag = (e: React.PointerEvent<HTMLCanvasElement>) => {
+        if (!dragRef.current) return;
+        e.currentTarget.releasePointerCapture(e.pointerId);
+        dragRef.current = null;
+        setDragging(null);
+    };
+
+    // ---- save ----
 
     const use = async () => {
         if (!canvasRef.current || !canUse) return;
@@ -119,6 +244,8 @@ export function PosterEditor({ open, backgroundUrl, initialHeadline = "", onClos
         }
     };
 
+    const moved = Object.keys(positions).length > 0;
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => !saving && onClose()}>
             <div
@@ -131,7 +258,7 @@ export function PosterEditor({ open, backgroundUrl, initialHeadline = "", onClos
                 <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-100">
                     <div>
                         <h2 className="text-2xl font-[var(--font-display)] text-neutral-900">Make a poster</h2>
-                        <p className="text-sm text-neutral-500">Text is set exactly as you type it, in your brand fonts.</p>
+                        <p className="text-sm text-neutral-500">Drag any text on the poster to move it.</p>
                     </div>
                     <button onClick={onClose} disabled={saving} aria-label="Close" className="p-2 text-neutral-500 hover:text-neutral-900 cursor-pointer">
                         <X className="w-5 h-5" />
@@ -144,20 +271,42 @@ export function PosterEditor({ open, backgroundUrl, initialHeadline = "", onClos
                         <div className="relative">
                             <canvas
                                 ref={canvasRef}
-                                className="block max-h-[70vh] max-w-full h-auto w-auto shadow-md"
+                                onPointerDown={onPointerDown}
+                                onPointerMove={onPointerMove}
+                                onPointerUp={endDrag}
+                                onPointerCancel={endDrag}
+                                className={`block max-h-[70vh] max-w-full h-auto w-auto shadow-md touch-none ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
                                 style={{ aspectRatio: `${SIZES[size].w} / ${SIZES[size].h}` }}
                             />
-                            {(!brand || rendering) && (
+                            {(!brand || rendering) && !dragging && (
                                 <div className="absolute top-2 right-2 rounded-full bg-white/90 p-1.5">
                                     <Loader2 className="w-4 h-4 animate-spin text-neutral-500" />
                                 </div>
                             )}
                         </div>
                         {warning && <p className="mt-3 text-sm text-primary-600">{warning}</p>}
+                        {moved && (
+                            <button
+                                onClick={() => setPositions({})}
+                                className="mt-3 inline-flex items-center gap-1.5 text-xs text-neutral-500 hover:text-neutral-800 cursor-pointer"
+                            >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                Reset positions
+                            </button>
+                        )}
                     </div>
 
                     {/* controls */}
                     <div className="space-y-5">
+                        <button
+                            onClick={writeCopy}
+                            disabled={writing || (!headline.trim() && !initialHeadline.trim())}
+                            className="inline-flex h-10 items-center gap-2 rounded-[var(--radius-md)] border border-primary-500 px-4 text-sm text-primary-500 hover:bg-primary-50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {writing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                            {writing ? "Writing…" : "Write with AI"}
+                        </button>
+
                         <Field label="Headline">
                             <textarea
                                 rows={2}
