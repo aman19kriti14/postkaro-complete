@@ -28,7 +28,7 @@ const ROUTES = {
     campaigns: "/campaigns",
     campaign: (id: string) => `/campaigns/${id}`,
     analytics: "/analytics",
-    post: (id: string) => `/posts/${id}/edit`,
+    post: (id: string) => `/create?draft=${id}`,
     create: "/create",
 };
 
