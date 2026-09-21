@@ -51,6 +51,8 @@ const ASPECTS = [
     { value: "9:16", label: "Tall", hint: "Story / Reel" },
 ];
 
+const MAX_SLIDES = 10;
+
 // Every image/video made or uploaded in this session. Nothing is thrown away on regenerate.
 interface MediaItem {
     url: string;
@@ -101,6 +103,13 @@ export function CreatePostPage() {
     const [productRefs, setProductRefs] = useState<string[]>([]); // product photos the AI must keep
     const [uploading, setUploading] = useState<"media" | "product" | null>(null);
     const [mediaError, setMediaError] = useState<string | null>(null);
+
+    // Carousel: an ordered list of slides picked from the gallery (Instagram allows 2–10)
+    const [postMode, setPostMode] = useState<"single" | "carousel">("single");
+    const [slides, setSlides] = useState<MediaItem[]>([]);
+    const [previewIndex, setPreviewIndex] = useState(0);
+    const [slideCount, setSlideCount] = useState(5);
+    const [generatingCarousel, setGeneratingCarousel] = useState(false);
 
     // Loading states
     const [generating, setGenerating] = useState(false);
@@ -174,12 +183,18 @@ export function CreatePostPage() {
                 setTone(p.tone ?? "warm");
                 setLanguage((p.language as LanguageCode) ?? "ENGLISH");
                 setCaption(p.caption ?? "");
-                const first = p.media?.[0];
-                if (first?.url) {
-                    const type = first.type === "video" ? "video" : "image";
+                const items: MediaItem[] = (p.media ?? [])
+                    .filter((m: any) => m?.url)
+                    .map((m: any) => ({ url: m.url, type: m.type === "video" ? "video" : "image", source: "draft" }));
+                const first = items[0];
+                if (first) {
                     setMediaUrl(first.url);
-                    setMediaType(type);
-                    setGallery([{ url: first.url, type, source: "draft" }]);
+                    setMediaType(first.type);
+                    setGallery(items);
+                    if (items.length > 1) {
+                        setPostMode("carousel");
+                        setSlides(items);
+                    }
                 }
                 setDraftChannels(p.channels ?? []);
             } catch {
@@ -199,6 +214,7 @@ export function CreatePostPage() {
     }, [draftChannels, channels.length]);
 
     const selectedChannels = channels.filter((c) => c.selected);
+    const carouselNotReady = postMode === "carousel" && slides.length < 2;
     const charCount = caption.length;
     const firstChannel = selectedChannels.length > 0 ? selectedChannels[0]! : null;
 
@@ -261,18 +277,57 @@ export function CreatePostPage() {
     }
 
     // Adds to the gallery (newest first) and selects it. Older items stay.
+    // In carousel mode, new items also become the next slide.
     function addToGallery(item: MediaItem) {
         setGallery((prev) => [item, ...prev.filter((g) => g.url !== item.url)]);
         setMediaUrl(item.url);
         setMediaType(item.type);
+        if (postMode === "carousel") {
+            setSlides((prev) =>
+                prev.some((s) => s.url === item.url) || prev.length >= MAX_SLIDES ? prev : [...prev, item],
+            );
+        }
     }
 
     function selectMedia(item: MediaItem) {
         setMediaUrl(item.url);
         setMediaType(item.type);
+        if (postMode === "carousel") toggleSlide(item);
+    }
+
+    // ─── Carousel slides ───────────────────────────────────
+
+    function toggleSlide(item: MediaItem) {
+        setSlides((prev) => {
+            if (prev.some((s) => s.url === item.url)) return prev.filter((s) => s.url !== item.url);
+            if (prev.length >= MAX_SLIDES) return prev;
+            return [...prev, item];
+        });
+    }
+
+    function moveSlide(index: number, dir: -1 | 1) {
+        setSlides((prev) => {
+            const target = index + dir;
+            if (target < 0 || target >= prev.length) return prev;
+            const next = [...prev];
+            const a = next[index]!;
+            next[index] = next[target]!;
+            next[target] = a;
+            return next;
+        });
+    }
+
+    function switchMode(mode: "single" | "carousel") {
+        setPostMode(mode);
+        setPreviewIndex(0);
+        // Starting a carousel: begin with whatever is currently selected
+        if (mode === "carousel" && slides.length === 0 && mediaUrl && mediaType) {
+            setSlides([{ url: mediaUrl, type: mediaType === "video" ? "video" : "image", source: "ai" }]);
+        }
     }
 
     function removeFromGallery(url: string) {
+        setSlides((prev) => prev.filter((s) => s.url !== url));
         const next = gallery.filter((g) => g.url !== url);
         setGallery(next);
         if (mediaUrl === url) {
@@ -334,6 +389,45 @@ export function CreatePostPage() {
         }
     }
 
+    // One idea → a matching set of slides (cover, content, call to action)
+    async function handleGenerateCarousel() {
+        const brief = imagePrompt.trim() || prompt.trim();
+        if (!brief) return;
+        setGeneratingCarousel(true);
+        setMediaError(null);
+        try {
+            const langLabel = LANGUAGES.find((l) => l.code === language)?.label ?? "English";
+            const res = await axios.post(
+                `${apiBase}/v1/posts/generate-carousel`,
+                {
+                    prompt: brief,
+                    slides: slideCount,
+                    aspectRatio: aspect === "1:1" ? "1:1" : "4:5", // carousels can't be 9:16
+                    language: langLabel,
+                    productImageUrls: productRefs,
+                },
+                // planning + one image per slide takes 1–2 minutes
+                { headers: { Authorization: `Bearer ${token()}` }, timeout: 300_000 },
+            );
+            const data = res.data.data;
+            const items: MediaItem[] = (data.urls ?? []).map((url: string) => ({ url, type: "image", source: "ai" }));
+            if (items.length === 0) throw new Error("No slides returned");
+
+            // Keep older versions in the gallery; the new set replaces the current slides
+            setGallery((prev) => [...items, ...prev.filter((g) => !items.some((i) => i.url === g.url))]);
+            setSlides(items);
+            setPreviewIndex(0);
+            setMediaUrl(items[0]!.url);
+            setMediaType("image");
+            if (!caption.trim() && data.caption) setCaption(data.caption);
+        } catch (err) {
+            console.error("Carousel generation failed:", err);
+            setMediaError(errorMessage(err, "Couldn't make the carousel. Try again."));
+        } finally {
+            setGeneratingCarousel(false);
+        }
+    }
+
     // POST /v1/uploads → Cloudinary URL
     async function uploadFile(file: File): Promise<{ url: string; type: "image" | "video" }> {
         const form = new FormData();
@@ -389,14 +483,23 @@ export function CreatePostPage() {
 
     // Creates the draft the first time, updates the same post after that
     async function persistDraft(): Promise<string> {
+        // Carousel → ordered slide list. Single → just the selected item.
+        const media: { url: string; type: string }[] =
+            postMode === "carousel"
+                ? slides.map((s) => ({ url: s.url, type: s.type }))
+                : mediaUrl
+                    ? [{ url: mediaUrl, type: mediaType ?? "image" }]
+                    : [];
         const body = {
             caption,
             prompt,
             tone,
             language,
             channels: selectedChannels.map((c) => c.platform),
-            mediaUrl,
-            mediaType,
+            media,
+            // kept for older backends that only read a single item
+            mediaUrl: media[0]?.url ?? null,
+            mediaType: media[0]?.type ?? null,
         };
         const headers = { Authorization: `Bearer ${token()}` };
 
@@ -512,7 +615,8 @@ export function CreatePostPage() {
                             size="sm"
                             onClick={handlePublishNow}
                             isLoading={publishing}
-                            disabled={!caption.trim() || selectedChannels.length === 0}
+                            disabled={!caption.trim() || selectedChannels.length === 0 || carouselNotReady}
+                            title={carouselNotReady ? "A carousel needs at least 2 slides" : undefined}
                         >
                             {publishing ? "Publishing…" : "Post now"}
                         </Button>
@@ -522,7 +626,8 @@ export function CreatePostPage() {
                             size="sm"
                             onClick={handleSchedule}
                             isLoading={scheduling}
-                            disabled={!caption.trim() || selectedChannels.length === 0}
+                            disabled={!caption.trim() || selectedChannels.length === 0 || carouselNotReady}
+                            title={carouselNotReady ? "A carousel needs at least 2 slides" : undefined}
                         >
                             {scheduling ? "Scheduling…" : "Schedule post"}
                         </Button>
@@ -630,7 +735,134 @@ export function CreatePostPage() {
 
                         {/* Media */}
                         <div className="space-y-4">
-                            <h2 className="text-xl font-[var(--font-display)] text-neutral-900">Media</h2>
+                            <div className="flex items-center justify-between flex-wrap gap-3">
+                                <h2 className="text-xl font-[var(--font-display)] text-neutral-900">Media</h2>
+                                {/* Single vs carousel */}
+                                <div className="inline-flex rounded-[var(--radius-md)] border border-neutral-200 p-0.5">
+                                    {(["single", "carousel"] as const).map((m) => (
+                                        <button
+                                            key={m}
+                                            onClick={() => switchMode(m)}
+                                            className={`px-4 py-1.5 rounded-[var(--radius-sm)] text-sm font-medium cursor-pointer transition-colors ${postMode === m
+                                                ? "bg-primary-50 text-primary-500"
+                                                : "text-neutral-500 hover:text-neutral-700"
+                                                }`}
+                                        >
+                                            {m === "single" ? "Single image" : "Carousel"}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {postMode === "carousel" && (
+                                <div className="rounded-[var(--radius-md)] border border-neutral-200 p-4 space-y-3">
+                                    {/* One-click AI carousel */}
+                                    <div className="flex flex-wrap items-center gap-3 p-3 rounded-[var(--radius-md)] bg-primary-50/40 border border-primary-100">
+                                        <div className="flex-1 min-w-[200px]">
+                                            <p className="text-sm font-medium text-neutral-900">Make a carousel with AI</p>
+                                            <p className="text-xs text-neutral-500">
+                                                Uses your post brief. Cover, content slides and a closing slide, all in one matching style.
+                                            </p>
+                                        </div>
+                                        <select
+                                            value={slideCount}
+                                            onChange={(e) => setSlideCount(Number(e.target.value))}
+                                            disabled={generatingCarousel}
+                                            className="h-9 px-2 rounded-[var(--radius-md)] border border-neutral-200 bg-white text-sm text-neutral-800 cursor-pointer"
+                                            aria-label="Number of slides"
+                                        >
+                                            {[3, 4, 5, 6, 7, 8, 10].map((n) => (
+                                                <option key={n} value={n}>
+                                                    {n} slides
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={handleGenerateCarousel}
+                                            isLoading={generatingCarousel}
+                                            disabled={generatingCarousel || generatingImage || (!imagePrompt.trim() && !prompt.trim())}
+                                        >
+                                            {generatingCarousel ? "Making slides…" : "✨ Generate carousel"}
+                                        </Button>
+                                    </div>
+                                    {generatingCarousel && (
+                                        <p className="text-xs text-neutral-500">
+                                            Planning the slides and designing each one. This takes about 1–2 minutes — keep this tab open.
+                                        </p>
+                                    )}
+                                    {slides.length > 0 && !generatingCarousel && (
+                                        <p className="text-xs text-neutral-400">
+                                            Generating again replaces these slides. Older images stay in "Your versions" below.
+                                        </p>
+                                    )}
+
+                                    <div className="flex items-center justify-between">
+                                        <p className="text-sm font-medium text-neutral-800">
+                                            Slides <span className="text-neutral-400 font-normal">· {slides.length}/{MAX_SLIDES}</span>
+                                        </p>
+                                        <p className="text-xs text-neutral-400">
+                                            New images are added as the next slide. Click a version below to add or remove it.
+                                        </p>
+                                    </div>
+
+                                    {slides.length === 0 ? (
+                                        <p className="text-sm text-neutral-400">
+                                            No slides yet. Make or upload images and they'll appear here in order.
+                                        </p>
+                                    ) : (
+                                        <div className="flex gap-3 overflow-x-auto pb-1">
+                                            {slides.map((s, i) => (
+                                                <div key={s.url} className="shrink-0 w-24">
+                                                    <div className="relative w-24 h-24 rounded-[var(--radius-sm)] overflow-hidden border border-neutral-200">
+                                                        {s.type === "image" ? (
+                                                            <img src={s.url} alt={`Slide ${i + 1}`} className="w-full h-full object-cover" />
+                                                        ) : (
+                                                            <video src={s.url} className="w-full h-full object-cover" muted />
+                                                        )}
+                                                        <span className="absolute top-1 left-1 min-w-5 h-5 px-1 rounded-full bg-primary-500 text-white text-[11px] font-semibold flex items-center justify-center">
+                                                            {i + 1}
+                                                        </span>
+                                                        <button
+                                                            onClick={() => toggleSlide(s)}
+                                                            className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center text-white text-[10px] cursor-pointer hover:bg-black/80"
+                                                            aria-label={`Remove slide ${i + 1}`}
+                                                        >
+                                                            ✕
+                                                        </button>
+                                                    </div>
+                                                    <div className="flex justify-between mt-1">
+                                                        <button
+                                                            onClick={() => moveSlide(i, -1)}
+                                                            disabled={i === 0}
+                                                            className="px-2 text-sm text-neutral-500 hover:text-neutral-800 disabled:opacity-30 cursor-pointer"
+                                                            aria-label="Move left"
+                                                        >
+                                                            ←
+                                                        </button>
+                                                        <button
+                                                            onClick={() => moveSlide(i, 1)}
+                                                            disabled={i === slides.length - 1}
+                                                            className="px-2 text-sm text-neutral-500 hover:text-neutral-800 disabled:opacity-30 cursor-pointer"
+                                                            aria-label="Move right"
+                                                        >
+                                                            →
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {slides.length === 1 && (
+                                        <p className="text-xs text-primary-600">Add at least one more slide to post a carousel.</p>
+                                    )}
+                                    <p className="text-xs text-neutral-400">
+                                        Tip: keep every slide the same size — Instagram crops all slides to the shape of slide 1.
+                                    </p>
+                                </div>
+                            )}
 
                             <div>
                                 <label className="text-sm font-medium text-neutral-700 block mb-1.5">
@@ -752,40 +984,52 @@ export function CreatePostPage() {
                             )}
 
                             {/* Everything made or uploaded — older versions stay here */}
-                            {(gallery.length > 1 || generatingImage || generatingVideo) && (
+                            {(gallery.length > 1 || (postMode === "carousel" && gallery.length > 0) || generatingImage || generatingVideo || generatingCarousel) && (
                                 <div>
                                     <p className="text-sm font-medium text-neutral-700 mb-2">
-                                        Your versions <span className="text-neutral-400 font-normal">· click one to use it</span>
+                                        Your versions{" "}
+                                        <span className="text-neutral-400 font-normal">
+                                            · {postMode === "carousel" ? "click to add or remove as a slide" : "click one to use it"}
+                                        </span>
                                     </p>
                                     <div className="flex flex-wrap gap-2">
-                                        {(generatingImage || generatingVideo) && (
+                                        {(generatingImage || generatingVideo || generatingCarousel) && (
                                             <div className="w-20 h-20 rounded-[var(--radius-sm)] border border-dashed border-primary-300 bg-primary-50/40 flex items-center justify-center text-[11px] text-primary-500 animate-pulse text-center px-1">
                                                 Creating…
                                             </div>
                                         )}
-                                        {gallery.map((item) => (
-                                            <div
-                                                key={item.url}
-                                                className={`relative w-20 h-20 rounded-[var(--radius-sm)] overflow-hidden border-2 cursor-pointer ${item.url === mediaUrl ? "border-primary-500" : "border-transparent hover:border-neutral-300"}`}
-                                                onClick={() => selectMedia(item)}
-                                            >
-                                                {item.type === "image" ? (
-                                                    <img src={item.url} alt="Version" className="w-full h-full object-cover" />
-                                                ) : (
-                                                    <video src={item.url} className="w-full h-full object-cover" muted />
-                                                )}
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        removeFromGallery(item.url);
-                                                    }}
-                                                    className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center text-white text-[10px] cursor-pointer hover:bg-black/80"
-                                                    aria-label="Remove"
+                                        {gallery.map((item) => {
+                                            const slideNo = slides.findIndex((s) => s.url === item.url) + 1;
+                                            const highlighted = postMode === "carousel" ? slideNo > 0 : item.url === mediaUrl;
+                                            return (
+                                                <div
+                                                    key={item.url}
+                                                    className={`relative w-20 h-20 rounded-[var(--radius-sm)] overflow-hidden border-2 cursor-pointer ${highlighted ? "border-primary-500" : "border-transparent hover:border-neutral-300"}`}
+                                                    onClick={() => selectMedia(item)}
                                                 >
-                                                    ✕
-                                                </button>
-                                            </div>
-                                        ))}
+                                                    {postMode === "carousel" && slideNo > 0 && (
+                                                        <span className="absolute bottom-1 left-1 min-w-5 h-5 px-1 rounded-full bg-primary-500 text-white text-[11px] font-semibold flex items-center justify-center z-10">
+                                                            {slideNo}
+                                                        </span>
+                                                    )}
+                                                    {item.type === "image" ? (
+                                                        <img src={item.url} alt="Version" className="w-full h-full object-cover" />
+                                                    ) : (
+                                                        <video src={item.url} className="w-full h-full object-cover" muted />
+                                                    )}
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            removeFromGallery(item.url);
+                                                        }}
+                                                        className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center text-white text-[10px] cursor-pointer hover:bg-black/80"
+                                                        aria-label="Remove"
+                                                    >
+                                                        ✕
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             )}
@@ -969,7 +1213,50 @@ export function CreatePostPage() {
                                     </div>
                                 )}
 
-                                {mediaUrl && mediaType === "image" ? (
+                                {postMode === "carousel" && slides.length > 0 ? (
+                                    (() => {
+                                        const idx = Math.min(previewIndex, slides.length - 1);
+                                        const s = slides[idx]!;
+                                        return (
+                                            <div className="relative">
+                                                {s.type === "image" ? (
+                                                    <img src={s.url} alt={`Slide ${idx + 1}`} className="w-full h-auto block" />
+                                                ) : (
+                                                    <video src={s.url} className="w-full h-auto block" controls />
+                                                )}
+                                                <span className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-black/60 text-white text-[11px]">
+                                                    {idx + 1}/{slides.length}
+                                                </span>
+                                                {idx > 0 && (
+                                                    <button
+                                                        onClick={() => setPreviewIndex(idx - 1)}
+                                                        className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-white/90 shadow text-neutral-700 cursor-pointer"
+                                                        aria-label="Previous slide"
+                                                    >
+                                                        ‹
+                                                    </button>
+                                                )}
+                                                {idx < slides.length - 1 && (
+                                                    <button
+                                                        onClick={() => setPreviewIndex(idx + 1)}
+                                                        className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-white/90 shadow text-neutral-700 cursor-pointer"
+                                                        aria-label="Next slide"
+                                                    >
+                                                        ›
+                                                    </button>
+                                                )}
+                                                <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1">
+                                                    {slides.map((sl, i) => (
+                                                        <span
+                                                            key={sl.url}
+                                                            className={`w-1.5 h-1.5 rounded-full ${i === idx ? "bg-primary-500" : "bg-white/80"}`}
+                                                        />
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        );
+                                    })()
+                                ) : mediaUrl && mediaType === "image" ? (
                                     <img src={mediaUrl} alt="Preview" className="w-full h-auto block" />
                                 ) : mediaUrl && mediaType === "video" ? (
                                     <video src={mediaUrl} className="w-full h-auto block" controls />
