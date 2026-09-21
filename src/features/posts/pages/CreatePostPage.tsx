@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ChangeEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/Button";
@@ -32,6 +32,31 @@ const REFINE_ACTIONS = [
 
 const tileClass =
     "w-[140px] h-[140px] rounded-[var(--radius-md)] border border-dashed border-neutral-300 flex flex-col items-center justify-center text-neutral-400 cursor-pointer hover:border-primary-400 hover:bg-primary-50/30 hover:text-primary-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
+
+// What kind of visual to make — sent to the backend prompt enhancer
+const CONTENT_TYPES = [
+    { value: "product_promo", label: "Product" },
+    { value: "offer", label: "Offer / sale" },
+    { value: "announcement", label: "Announcement" },
+    { value: "event", label: "Event" },
+    { value: "festive", label: "Festive" },
+    { value: "educational", label: "Tip / fact" },
+    { value: "infographic", label: "Infographic" },
+    { value: "testimonial", label: "Testimonial" },
+];
+
+const ASPECTS = [
+    { value: "1:1", label: "Square", hint: "Feed" },
+    { value: "4:5", label: "Portrait", hint: "Feed, more space" },
+    { value: "9:16", label: "Tall", hint: "Story / Reel" },
+];
+
+// Every image/video made or uploaded in this session. Nothing is thrown away on regenerate.
+interface MediaItem {
+    url: string;
+    type: "image" | "video";
+    source: "ai" | "upload" | "poster" | "draft";
+}
 
 interface ChannelOption {
     id: string;
@@ -70,6 +95,12 @@ export function CreatePostPage() {
     const [mediaType, setMediaType] = useState<string | null>(null);
     const [imagePrompt, setImagePrompt] = useState("");
     const [posterOpen, setPosterOpen] = useState(false);
+    const [gallery, setGallery] = useState<MediaItem[]>([]);
+    const [contentType, setContentType] = useState("product_promo");
+    const [aspect, setAspect] = useState("1:1");
+    const [productRefs, setProductRefs] = useState<string[]>([]); // product photos the AI must keep
+    const [uploading, setUploading] = useState<"media" | "product" | null>(null);
+    const [mediaError, setMediaError] = useState<string | null>(null);
 
     // Loading states
     const [generating, setGenerating] = useState(false);
@@ -145,8 +176,10 @@ export function CreatePostPage() {
                 setCaption(p.caption ?? "");
                 const first = p.media?.[0];
                 if (first?.url) {
+                    const type = first.type === "video" ? "video" : "image";
                     setMediaUrl(first.url);
-                    setMediaType(first.type === "video" ? "video" : "image");
+                    setMediaType(type);
+                    setGallery([{ url: first.url, type, source: "draft" }]);
                 }
                 setDraftChannels(p.channels ?? []);
             } catch {
@@ -219,20 +252,64 @@ export function CreatePostPage() {
 
     // ─── AI Media ──────────────────────────────────────────
 
+    function errorMessage(err: unknown, fallback: string) {
+        if (axios.isAxiosError(err)) {
+            if (err.code === "ECONNABORTED") return "This is taking longer than usual. Try again in a minute.";
+            return err.response?.data?.message ?? fallback;
+        }
+        return fallback;
+    }
+
+    // Adds to the gallery (newest first) and selects it. Older items stay.
+    function addToGallery(item: MediaItem) {
+        setGallery((prev) => [item, ...prev.filter((g) => g.url !== item.url)]);
+        setMediaUrl(item.url);
+        setMediaType(item.type);
+    }
+
+    function selectMedia(item: MediaItem) {
+        setMediaUrl(item.url);
+        setMediaType(item.type);
+    }
+
+    function removeFromGallery(url: string) {
+        const next = gallery.filter((g) => g.url !== url);
+        setGallery(next);
+        if (mediaUrl === url) {
+            const fallback = next[0];
+            setMediaUrl(fallback ? fallback.url : null);
+            setMediaType(fallback ? fallback.type : null);
+        }
+    }
+
     async function handleGenerateImage() {
         const brief = imagePrompt.trim() || prompt.trim();
         if (!brief) return;
         setGeneratingImage(true);
+        setMediaError(null);
         try {
+            const langLabel = LANGUAGES.find((l) => l.code === language)?.label ?? "English";
             const res = await axios.post(
                 `${apiBase}/v1/posts/generate-image`,
-                { prompt: brief, size: "square" },
-                { headers: { Authorization: `Bearer ${token()}` } },
+                {
+                    prompt: brief,
+                    contentType,
+                    aspectRatio: aspect,
+                    language: langLabel,
+                    productImageUrls: productRefs,
+                    variations: 1,
+                },
+                // 2K generation + prompt enhancing takes 30–90s
+                { headers: { Authorization: `Bearer ${token()}` }, timeout: 180_000 },
             );
-            setMediaUrl(res.data.data.url);
-            setMediaType("image");
+            const data = res.data.data;
+            const urls: string[] = data.urls ?? (data.url ? [data.url] : []);
+            // add oldest-first so the first result ends up selected
+            [...urls].reverse().forEach((url) => addToGallery({ url, type: "image", source: "ai" }));
+            if (!caption.trim() && data.caption) setCaption(data.caption);
         } catch (err) {
             console.error("Image generation failed:", err);
+            setMediaError(errorMessage(err, "Couldn't make the image. Try again."));
         } finally {
             setGeneratingImage(false);
         }
@@ -241,18 +318,70 @@ export function CreatePostPage() {
     async function handleGenerateVideo() {
         if (!prompt.trim()) return;
         setGeneratingVideo(true);
+        setMediaError(null);
         try {
             const res = await axios.post(
                 `${apiBase}/v1/posts/generate-video`,
                 { prompt: prompt.trim() },
-                { headers: { Authorization: `Bearer ${token()}` } },
+                { headers: { Authorization: `Bearer ${token()}` }, timeout: 300_000 },
             );
-            setMediaUrl(res.data.data.url);
-            setMediaType("video");
+            addToGallery({ url: res.data.data.url, type: "video", source: "ai" });
         } catch (err) {
             console.error("Video generation failed:", err);
+            setMediaError(errorMessage(err, "Couldn't make the video. Try again."));
         } finally {
             setGeneratingVideo(false);
+        }
+    }
+
+    // POST /v1/uploads → Cloudinary URL
+    async function uploadFile(file: File): Promise<{ url: string; type: "image" | "video" }> {
+        const form = new FormData();
+        form.append("file", file);
+        form.append("kind", "media");
+        const res = await axios.post(`${apiBase}/v1/uploads`, form, {
+            // no Content-Type: the browser sets the multipart boundary itself
+            headers: { Authorization: `Bearer ${token()}` },
+            timeout: 120_000,
+        });
+        const body = res.data?.data ?? res.data; // endpoint returns { url, type } unwrapped
+        return { url: body.url, type: body.type === "video" ? "video" : "image" };
+    }
+
+    async function handleUpload(e: ChangeEvent<HTMLInputElement>) {
+        const file = e.target.files?.[0];
+        e.target.value = ""; // allow picking the same file again
+        if (!file) return;
+        setUploading("media");
+        setMediaError(null);
+        try {
+            const { url, type } = await uploadFile(file);
+            addToGallery({ url, type, source: "upload" });
+        } catch (err) {
+            console.error("Upload failed:", err);
+            setMediaError(errorMessage(err, "Upload failed. Try again."));
+        } finally {
+            setUploading(null);
+        }
+    }
+
+    async function handleProductUpload(e: ChangeEvent<HTMLInputElement>) {
+        const files = Array.from(e.target.files ?? []).slice(0, 3 - productRefs.length);
+        e.target.value = "";
+        if (files.length === 0) return;
+        setUploading("product");
+        setMediaError(null);
+        try {
+            for (const file of files) {
+                if (!file.type.startsWith("image/")) continue;
+                const { url } = await uploadFile(file);
+                setProductRefs((prev) => (prev.length >= 3 ? prev : [...prev, url]));
+            }
+        } catch (err) {
+            console.error("Product photo upload failed:", err);
+            setMediaError(errorMessage(err, "Upload failed. Try again."));
+        } finally {
+            setUploading(null);
         }
     }
 
@@ -514,36 +643,163 @@ export function CreatePostPage() {
                                     className="w-full min-h-[70px] px-3 py-2.5 rounded-[var(--radius-md)] border border-neutral-200 bg-white text-sm text-neutral-800 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent resize-vertical"
                                 />
                                 <p className="mt-1.5 text-xs text-neutral-400">
-                                    Leave blank to use the post brief. Say what should be in the shot, the angle, and the light.
+                                    Leave blank to use the post brief. Your brand colours and logo from Settings are added automatically.
                                 </p>
                             </div>
 
-                            {mediaUrl && (
-                                <div className="relative w-[280px] h-[280px] rounded-[var(--radius-md)] overflow-hidden border border-neutral-200">
-                                    {mediaType === "image" ? (
-                                        <img src={mediaUrl} alt="Generated" className="w-full h-full object-cover" />
-                                    ) : (
-                                        <video src={mediaUrl} className="w-full h-full object-cover" controls />
+                            {/* Content type */}
+                            <div>
+                                <label className="text-sm font-medium text-neutral-700 block mb-2">Type of post</label>
+                                <div className="flex flex-wrap gap-2">
+                                    {CONTENT_TYPES.map((t) => (
+                                        <button
+                                            key={t.value}
+                                            onClick={() => setContentType(t.value)}
+                                            className={`px-3 py-1.5 rounded-[var(--radius-md)] text-sm font-medium border transition-colors cursor-pointer ${contentType === t.value
+                                                ? "border-primary-500 text-primary-500 bg-primary-50"
+                                                : "border-neutral-200 text-neutral-600 hover:border-neutral-300"
+                                                }`}
+                                        >
+                                            {t.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Size */}
+                            <div>
+                                <label className="text-sm font-medium text-neutral-700 block mb-2">Size</label>
+                                <div className="flex flex-wrap gap-2">
+                                    {ASPECTS.map((a) => (
+                                        <button
+                                            key={a.value}
+                                            onClick={() => setAspect(a.value)}
+                                            title={a.hint}
+                                            className={`px-3 py-1.5 rounded-[var(--radius-md)] text-sm font-medium border transition-colors cursor-pointer ${aspect === a.value
+                                                ? "border-primary-500 text-primary-500 bg-primary-50"
+                                                : "border-neutral-200 text-neutral-600 hover:border-neutral-300"
+                                                }`}
+                                        >
+                                            {a.label} <span className="text-neutral-400 font-normal">{a.value}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Product photos the AI should keep */}
+                            <div>
+                                <label className="text-sm font-medium text-neutral-700 block mb-1">
+                                    Your product photo <span className="text-neutral-400">(optional, up to 3)</span>
+                                </label>
+                                <p className="text-xs text-neutral-400 mb-2">
+                                    Add a photo of your real product and the AI will keep it exactly as it is in every image.
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                    {productRefs.map((url) => (
+                                        <div key={url} className="relative w-16 h-16 rounded-[var(--radius-sm)] overflow-hidden border border-neutral-200">
+                                            <img src={url} alt="Product" className="w-full h-full object-cover" />
+                                            <button
+                                                onClick={() => setProductRefs((prev) => prev.filter((u) => u !== url))}
+                                                className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center text-white text-[10px] cursor-pointer hover:bg-black/80"
+                                                aria-label="Remove product photo"
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                    ))}
+                                    {productRefs.length < 3 && (
+                                        <label className="w-16 h-16 rounded-[var(--radius-sm)] border border-dashed border-neutral-300 flex items-center justify-center text-neutral-400 text-xs cursor-pointer hover:border-primary-400 hover:text-primary-500">
+                                            {uploading === "product" ? "…" : "+ Add"}
+                                            <input
+                                                type="file"
+                                                className="hidden"
+                                                accept="image/jpeg,image/png,image/webp"
+                                                multiple
+                                                disabled={uploading !== null}
+                                                onChange={handleProductUpload}
+                                            />
+                                        </label>
                                     )}
-                                    <button
-                                        onClick={() => {
-                                            setMediaUrl(null);
-                                            setMediaType(null);
-                                        }}
-                                        className="absolute top-2 right-2 w-6 h-6 bg-black/50 rounded-full flex items-center justify-center text-white text-xs cursor-pointer hover:bg-black/70"
+                                </div>
+                            </div>
+
+                            {/* Selected media */}
+                            {mediaUrl && (
+                                <div className="relative w-[280px] rounded-[var(--radius-md)] overflow-hidden border border-neutral-200 bg-neutral-50">
+                                    {mediaType === "image" ? (
+                                        <img src={mediaUrl} alt="Selected" className="w-full h-auto block" />
+                                    ) : (
+                                        <video src={mediaUrl} className="w-full h-auto block" controls />
+                                    )}
+                                    <a
+                                        href={mediaUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="absolute top-2 left-2 px-2 py-1 rounded-[var(--radius-sm)] bg-black/60 text-[11px] font-medium text-white hover:bg-black/80"
                                     >
-                                        ✕
-                                    </button>
+                                        Open full size
+                                    </a>
                                     {mediaType === "image" && (
                                         <button
                                             onClick={handleGenerateImage}
                                             disabled={generatingImage}
                                             className="absolute bottom-2 right-2 px-3 py-1.5 rounded-[var(--radius-sm)] bg-black/60 text-xs font-medium text-white cursor-pointer hover:bg-black/80 disabled:opacity-50"
                                         >
-                                            {generatingImage ? "Generating…" : "Regenerate"}
+                                            {generatingImage ? "Generating…" : "Make another"}
                                         </button>
                                     )}
                                 </div>
+                            )}
+
+                            {/* Everything made or uploaded — older versions stay here */}
+                            {(gallery.length > 1 || generatingImage || generatingVideo) && (
+                                <div>
+                                    <p className="text-sm font-medium text-neutral-700 mb-2">
+                                        Your versions <span className="text-neutral-400 font-normal">· click one to use it</span>
+                                    </p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {(generatingImage || generatingVideo) && (
+                                            <div className="w-20 h-20 rounded-[var(--radius-sm)] border border-dashed border-primary-300 bg-primary-50/40 flex items-center justify-center text-[11px] text-primary-500 animate-pulse text-center px-1">
+                                                Creating…
+                                            </div>
+                                        )}
+                                        {gallery.map((item) => (
+                                            <div
+                                                key={item.url}
+                                                className={`relative w-20 h-20 rounded-[var(--radius-sm)] overflow-hidden border-2 cursor-pointer ${item.url === mediaUrl ? "border-primary-500" : "border-transparent hover:border-neutral-300"}`}
+                                                onClick={() => selectMedia(item)}
+                                            >
+                                                {item.type === "image" ? (
+                                                    <img src={item.url} alt="Version" className="w-full h-full object-cover" />
+                                                ) : (
+                                                    <video src={item.url} className="w-full h-full object-cover" muted />
+                                                )}
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        removeFromGallery(item.url);
+                                                    }}
+                                                    className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center text-white text-[10px] cursor-pointer hover:bg-black/80"
+                                                    aria-label="Remove"
+                                                >
+                                                    ✕
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {mediaError && (
+                                <p className="text-sm text-primary-600 bg-primary-50 border border-primary-100 rounded-[var(--radius-md)] px-3 py-2">
+                                    {mediaError}
+                                </p>
+                            )}
+
+                            {generatingImage && (
+                                <p className="text-xs text-neutral-500">
+                                    Creating a high-quality image. This usually takes 30–60 seconds.
+                                </p>
                             )}
 
                             <div className="flex flex-wrap gap-3">
@@ -580,8 +836,14 @@ export function CreatePostPage() {
                                     <svg className="w-6 h-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                                     </svg>
-                                    <span className="text-xs font-medium">Upload</span>
-                                    <input type="file" className="hidden" accept="image/*,video/*" />
+                                    <span className="text-xs font-medium">{uploading === "media" ? "Uploading…" : "Upload"}</span>
+                                    <input
+                                        type="file"
+                                        className="hidden"
+                                        accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime"
+                                        disabled={uploading !== null}
+                                        onChange={handleUpload}
+                                    />
                                 </label>
                             </div>
                         </div>
@@ -708,9 +970,9 @@ export function CreatePostPage() {
                                 )}
 
                                 {mediaUrl && mediaType === "image" ? (
-                                    <img src={mediaUrl} alt="Preview" className="w-full aspect-square object-cover" />
+                                    <img src={mediaUrl} alt="Preview" className="w-full h-auto block" />
                                 ) : mediaUrl && mediaType === "video" ? (
-                                    <video src={mediaUrl} className="w-full aspect-square object-cover" controls />
+                                    <video src={mediaUrl} className="w-full h-auto block" controls />
                                 ) : (
                                     <div className="aspect-square bg-neutral-100 flex items-center justify-center text-neutral-300 text-sm">
                                         No media yet
@@ -735,10 +997,7 @@ export function CreatePostPage() {
                 initialHeadline={prompt}
                 language={language}
                 onClose={() => setPosterOpen(false)}
-                onUse={(url) => {
-                    setMediaUrl(url);
-                    setMediaType("image");
-                }}
+                onUse={(url) => addToGallery({ url, type: "image", source: "poster" })}
             />
         </div>
     );
