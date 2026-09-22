@@ -119,4 +119,51 @@ api.interceptors.response.use(
   }
 );
 
+/**
+ * 402 handling. The backend returns 402 with data.code = TRIAL_EXPIRED or
+ * INSUFFICIENT_CREDITS. We broadcast an event instead of importing the store,
+ * which would create an import cycle.
+ *
+ * Registered on BOTH the `api` instance and the global axios default, because
+ * feature APIs call plain axios with explicit headers.
+ */
+function handlePaymentRequired(error: AxiosError<any>) {
+  if (error.response?.status !== 402) return;
+
+  const code = error.response?.data?.data?.code;
+  const message =
+    error.response?.data?.message ?? "Your free trial has ended.";
+
+  if (code === "TRIAL_EXPIRED") {
+    window.dispatchEvent(new CustomEvent("pk:trial-expired", { detail: { message } }));
+  } else {
+    // Out of credits: balance changed or they need a top-up
+    window.dispatchEvent(
+      new CustomEvent("pk:credits-changed", {
+        detail: {
+          message,
+          required: error.response?.data?.data?.required,
+          available: error.response?.data?.data?.available,
+        },
+      })
+    );
+  }
+}
+
+api.interceptors.response.use(
+  (res) => res,
+  (error: AxiosError<any>) => {
+    handlePaymentRequired(error);
+    return Promise.reject(error);
+  }
+);
+
+axios.interceptors.response.use(
+  (res) => res,
+  (error: AxiosError<any>) => {
+    handlePaymentRequired(error);
+    return Promise.reject(error);
+  }
+);
+
 export default api;

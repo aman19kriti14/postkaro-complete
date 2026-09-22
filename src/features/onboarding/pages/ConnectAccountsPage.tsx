@@ -141,7 +141,7 @@ export function ConnectAccountsPage() {
                 });
             }
 
-            navigate("/dashboard");
+            navigate("/brand-profile?welcome=1");
         } catch (err: any) {
             if (!err.response) {
                 setApiError("Cannot connect to server.");

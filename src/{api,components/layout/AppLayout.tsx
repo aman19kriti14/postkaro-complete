@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import { Menu } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 import { Logo } from "../{ui,guards},config,features/Logo";
+import { TrialBanner } from "@/features/billing/TrialBanner";
 
 export function AppLayout() {
     const [open, setOpen] = useState(false);
@@ -26,6 +27,7 @@ export function AppLayout() {
                 </header>
 
                 <main className="flex-1 overflow-auto">
+                    <TrialBanner />
                     <Outlet />
                 </main>
             </div>

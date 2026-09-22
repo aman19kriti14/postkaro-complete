@@ -11,6 +11,7 @@ import { useSidebarCounts } from "@/features/Calendar/useSidebarCounts";
 import type { SidebarCounts } from "@/features/Calendar/api";
 import { useAuthStore } from "@/stores/auth.store";
 import { Logo } from "../{ui,guards},config,features/Logo";
+import { CreditBadge } from "@/features/billing/CreditBadge";
 
 type NavItem = {
     path: string;
@@ -123,6 +124,11 @@ export function Sidebar({ open, onClose }: Props) {
                         );
                     })}
                 </nav>
+
+                <div className="mt-4">
+                    <CreditBadge />
+                </div>
+
 
                 <div className="mt-4 flex items-center gap-3 border-t border-neutral-800 pt-4">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#C8102E] text-xs font-semibold text-white">

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { aiStudioApi, apiError, type GenerateInput, type Idea, type IdeaSet, type SavedSetSummary } from "./api";
 import { IdeaComposer } from "./IdeaComposer";
 import { IdeaGrid, type IdeaAction } from "./IdeaCard";
+import { BrandPromptStrip } from "../brand-profile/BrandPromptStrip";
 
 // ⚠️ adjust to your router
 const ROUTES = {
@@ -154,6 +155,8 @@ export function AiStudioPage() {
             </p>
 
             <div className="mt-8 mb-8 h-px bg-neutral-200" />
+
+            <BrandPromptStrip />
 
             <IdeaComposer
                 initial={composerInitial}

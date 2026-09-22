@@ -18,6 +18,7 @@ import { AppLayout } from "@/{api,components/layout/AppLayout";
 import { AnalyticsPage } from "@/features/analytics/AnalyticsPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { BrandProfilePage } from "@/features/brand-profile/BrandProfilePage";
+import { BillingPage } from "@/features/billing/BillingPage";
 
 export const router = createBrowserRouter([
   {
@@ -52,6 +53,7 @@ export const router = createBrowserRouter([
           { path: "/brand-profile", element: <BrandProfilePage /> },
           { path: "/analytics", element: <AnalyticsPage /> },
           { path: "/settings", element: <SettingsPage /> },
+          { path: "/billing", element: <BillingPage /> },
         ],
       },
     ],
