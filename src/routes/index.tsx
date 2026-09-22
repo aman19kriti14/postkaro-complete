@@ -17,6 +17,7 @@ import { AiStudioPage } from "@/features/ai-studio/AiStudioPage";
 import { AppLayout } from "@/{api,components/layout/AppLayout";
 import { AnalyticsPage } from "@/features/analytics/AnalyticsPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
+import { BrandProfilePage } from "@/features/brand-profile/BrandProfilePage";
 
 export const router = createBrowserRouter([
   {
@@ -48,6 +49,7 @@ export const router = createBrowserRouter([
           { path: "/campaigns/:id", element: <CampaignDetailPage /> },
           { path: "/campaigns/:id/build", element: <CampaignBuilderPage /> },
           { path: "/ai-studio", element: <AiStudioPage /> },
+          { path: "/brand-profile", element: <BrandProfilePage /> },
           { path: "/analytics", element: <AnalyticsPage /> },
           { path: "/settings", element: <SettingsPage /> },
         ],

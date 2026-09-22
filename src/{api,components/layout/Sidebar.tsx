@@ -3,6 +3,7 @@ import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
     LayoutDashboard, Calendar, Megaphone, FileText,
     Sparkles, BarChart3, Settings, Plus, X, LogOut,
+    Store,
 } from "lucide-react";
 
 import { useSidebarCounts } from "@/features/Calendar/useSidebarCounts";
@@ -24,6 +25,7 @@ const NAV_ITEMS: NavItem[] = [
     { path: "/campaigns", label: "Campaigns", icon: Megaphone, count: (c) => c.campaigns },
     { path: "/drafts", label: "Drafts", icon: FileText, count: (c) => c.drafts },
     { path: "/ai-studio", label: "AI studio", icon: Sparkles },
+    { path: "/brand-profile", label: "My brand", icon: Store },
     { path: "/analytics", label: "Analytics", icon: BarChart3 },
     // { path: "/social-accounts", label: "Social accounts", icon: Share2 },
     { path: "/settings", label: "Settings", icon: Settings },

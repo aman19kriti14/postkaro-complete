@@ -169,6 +169,43 @@ export function CreatePostPage() {
         else if (mode === "schedule") setScheduleType("pick");
     }, [mode]);
 
+    // Opened from "My brand" → "Use this": prefill the prompt and match the format
+    const promptParam = searchParams.get("prompt");
+    const formatParam = searchParams.get("format");
+    useEffect(() => {
+        if (draftId || !promptParam) return; // editing a draft wins
+        setPrompt(promptParam);
+        if (formatParam === "carousel") {
+            setPostMode("carousel");
+        } else if (formatParam === "reel" || formatParam === "story") {
+            setAspect("9:16");
+        } else if (formatParam === "post") {
+            setAspect("1:1");
+        }
+    }, [promptParam, formatParam, draftId]);
+
+    // Real best time from the user's own post history (replaces the old hardcoded text)
+    const [bestTime, setBestTime] = useState<{
+        fromYourData: boolean;
+        message: string;
+        nextDate: string;
+        nextTime: string;
+    } | null>(null);
+
+    useEffect(() => {
+        axios
+            .get(`${apiBase}/v1/posts/best-time`, { headers: { Authorization: `Bearer ${token()}` } })
+            .then((res) => setBestTime(res.data.data))
+            .catch(() => setBestTime(null)); // no message is better than a fake one
+    }, []);
+
+    // With "Best time" selected, fill the date/time boxes with that slot
+    useEffect(() => {
+        if (!bestTime || scheduleType !== "best" || draftId) return;
+        setScheduleDate(bestTime.nextDate);
+        setScheduleTime(bestTime.nextTime);
+    }, [bestTime, scheduleType, draftId]);
+
     // Load an existing draft when opened from Drafts
     useEffect(() => {
         if (!draftId) return;
@@ -1140,7 +1177,7 @@ export function CreatePostPage() {
                                         <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
                                     </svg>
                                     <p className="text-sm text-primary-700">
-                                        Your audience is most active Wednesdays around 11:30 am. Best-time posting picks the slot for each channel.
+                                        {bestTime ? bestTime.message : "Working out your best time to post…"}
                                     </p>
                                 </div>
                             )}
