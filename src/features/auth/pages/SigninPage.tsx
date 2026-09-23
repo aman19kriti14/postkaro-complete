@@ -153,7 +153,9 @@ export function SigninPage() {
             />
             <span className="text-sm text-neutral-600">Keep me signed in</span>
           </label>
-          <Link to="/forgot-password" className="text-sm font-medium text-primary-500 hover:text-primary-600">Forgot password?</Link>
+          <Link to="/forgot-password" className="text-sm text-neutral-500 hover:text-[#C8102E]">
+            Forgot password?
+          </Link>
         </div>
 
         <Button type="submit" fullWidth size="lg" variant="outline" isLoading={loading}>

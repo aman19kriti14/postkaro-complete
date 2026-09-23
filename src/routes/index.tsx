@@ -19,6 +19,8 @@ import { AnalyticsPage } from "@/features/analytics/AnalyticsPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { BrandProfilePage } from "@/features/brand-profile/BrandProfilePage";
 import { BillingPage } from "@/features/billing/BillingPage";
+import { VerifyEmailPage } from "@/features/auth/pages/VerifyEmailPage";
+import { ForgotPasswordPage } from "@/features/auth/pages/ForgotPasswordPage";
 
 export const router = createBrowserRouter([
   {
@@ -26,6 +28,7 @@ export const router = createBrowserRouter([
     children: [
       { path: "/signup", element: <SignupPage /> },
       { path: "/signin", element: <SigninPage /> },
+      { path: "/forgot-password", element: <ForgotPasswordPage /> },
     ],
   },
 
@@ -33,6 +36,7 @@ export const router = createBrowserRouter([
     element: <AuthGuard />,
     children: [
       // Signup flow only — no sidebar by design
+      { path: "/verify-email", element: <VerifyEmailPage /> },
       { path: "/onboarding", element: <OnboardingPage /> },
       { path: "/connect-accounts", element: <ConnectAccountsPage /> },
 

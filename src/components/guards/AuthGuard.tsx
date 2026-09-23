@@ -18,8 +18,18 @@ export function AuthGuard() {
     return <Navigate to="/signin" state={{ from: location }} replace />;
   }
 
+  // Email first — nothing else works until it's verified
+  if (user && !user.emailVerified && location.pathname !== "/verify-email") {
+    return <Navigate to="/verify-email" replace />;
+  }
+
+  // Already verified? Don't let them back onto the verify screen
+  if (user?.emailVerified && location.pathname === "/verify-email") {
+    return <Navigate to={user.onboardingComplete ? "/dashboard" : "/onboarding"} replace />;
+  }
+
   // Allow onboarding flow pages even if onboarding isn't complete
-  const onboardingPaths = ["/onboarding", "/connect-accounts"];
+  const onboardingPaths = ["/onboarding", "/connect-accounts", "/verify-email"];
   if (user && !user.onboardingComplete && !onboardingPaths.includes(location.pathname)) {
     return <Navigate to="/onboarding" replace />;
   }
@@ -39,6 +49,9 @@ export function GuestGuard() {
   }
 
   if (isAuthenticated) {
+    if (user && !user.emailVerified) {
+      return <Navigate to="/verify-email" replace />;
+    }
     if (user && !user.onboardingComplete) {
       return <Navigate to="/connect-accounts" replace />;
     }

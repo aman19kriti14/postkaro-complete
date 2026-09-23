@@ -4,6 +4,7 @@ export interface User {
   email: string;
   avatarUrl: string | null;
   onboardingComplete: boolean;
+  emailVerified: boolean;
   connectedAccounts: ConnectedAccount[];
   createdAt: string;
 }

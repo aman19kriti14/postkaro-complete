@@ -45,7 +45,7 @@ export function SignupPage() {
     try {
       await signup({ fullName: data.name, email: data.email, password: data.password });
       toast.success("Account created! Let's connect your social accounts.");
-      navigate("/onboarding");
+      navigate("/verify-email");
     } catch {
       // Error already in store
     }
