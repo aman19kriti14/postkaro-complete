@@ -53,7 +53,7 @@ export function GuestGuard() {
       return <Navigate to="/verify-email" replace />;
     }
     if (user && !user.onboardingComplete) {
-      return <Navigate to="/connect-accounts" replace />;
+      return <Navigate to="/onboarding" replace />;
     }
     return <Navigate to="/dashboard" replace />;
   }
