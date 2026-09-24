@@ -21,6 +21,8 @@ import { BrandProfilePage } from "@/features/brand-profile/BrandProfilePage";
 import { BillingPage } from "@/features/billing/BillingPage";
 import { VerifyEmailPage } from "@/features/auth/pages/VerifyEmailPage";
 import { ForgotPasswordPage } from "@/features/auth/pages/ForgotPasswordPage";
+import { QuickCreatePage } from "@/features/posts/pages/QuickCreatePage";
+import { QuickReelPage } from "@/features/posts/pages/QuickReelPage";
 
 export const router = createBrowserRouter([
   {
@@ -47,7 +49,9 @@ export const router = createBrowserRouter([
           { path: "/dashboard", element: <DashboardPage /> },
           { path: "/calendar", element: <CalendarPage /> },
           { path: "/drafts", element: <DraftsPage /> },
-          { path: "/create", element: <CreatePostPage /> },
+          { path: "/create", element: <QuickCreatePage /> },
+          { path: "/create/reel", element: <QuickReelPage /> },
+          { path: "/create/advanced", element: <CreatePostPage /> },
           { path: "/campaigns", element: <CampaignsPage /> },
           { path: "/campaigns/new", element: <StartCampaignPage /> },
           { path: "/campaigns/start", element: <StartCampaignPage /> },

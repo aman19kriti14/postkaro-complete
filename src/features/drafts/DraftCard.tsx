@@ -37,7 +37,8 @@ function missing(d: Draft): string[] {
 export function DraftCard({ draft, onContinue, onSchedule, scheduleSlot }: Props) {
     const todo = missing(draft);
     const ready = draft.readyToSchedule;
-    const isVideo = draft.contentType === "REEL";
+    const isVideo =
+        draft.contentType === "REEL" || /\.(mp4|mov|webm)(\?|$)/i.test(draft.mediaUrl ?? "");
 
     return (
         <article
@@ -49,7 +50,7 @@ export function DraftCard({ draft, onContinue, onSchedule, scheduleSlot }: Props
                 {draft.hasVisual && draft.mediaUrl ? (
                     isVideo ? (
                         <video
-                            src={draft.mediaUrl}
+                            src={`${draft.mediaUrl}#t=1`}
                             muted
                             playsInline
                             preload="metadata"
