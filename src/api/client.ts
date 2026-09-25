@@ -1,5 +1,6 @@
 import axios, {
   AxiosError,
+  AxiosInstance,
   InternalAxiosRequestConfig,
   AxiosResponse,
 } from "axios";
@@ -44,80 +45,87 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   return config;
 });
 
-let isRefreshing = false;
-let pendingQueue: Array<{
-  resolve: (token: string) => void;
-  reject: (err: unknown) => void;
-}> = [];
+/**
+ * Refresh on 401.
+ *
+ * Registered on BOTH the `api` instance and the global axios default, because
+ * most feature APIs call plain axios with their own headers().
+ * One refresh runs at a time; every request that hit 401 meanwhile waits for it
+ * and is retried with the new token.
+ */
+let refreshInFlight: Promise<string> | null = null;
 
-function processQueue(error: unknown, token: string | null) {
-  pendingQueue.forEach(({ resolve, reject }) => {
-    if (error) reject(error);
-    else if (token) resolve(token);
-  });
-  pendingQueue = [];
+function refreshAccessToken(): Promise<string> {
+  if (refreshInFlight) return refreshInFlight;
+
+  const usedRefresh = tokenStore.getRefresh();
+  if (!usedRefresh) return Promise.reject(new Error("No refresh token"));
+
+  refreshInFlight = axios
+    .post<ApiResponse<{ tokens?: AuthTokens } & Partial<AuthTokens>>>(
+      `${env.API_BASE_URL}/v1/auth/refresh`,
+      { refreshToken: usedRefresh }
+    )
+    .then(({ data }) => {
+      // Backend returns { user, tokens: {...} }, same as signin
+      const tokens = (data.data?.tokens ?? data.data) as AuthTokens;
+      if (!tokens?.accessToken || !tokens?.refreshToken) {
+        throw new Error("Refresh response had no tokens");
+      }
+      tokenStore.set(tokens);
+      return tokens.accessToken;
+    })
+    .catch((err) => {
+      // Another tab may have refreshed first (our token got rotated out):
+      // if storage now holds a different refresh token, use its access token
+      const current = tokenStore.getRefresh();
+      const access = tokenStore.getAccess();
+      if (current && current !== usedRefresh && access) return access;
+      throw err;
+    })
+    .finally(() => {
+      refreshInFlight = null;
+    });
+
+  return refreshInFlight;
 }
 
-api.interceptors.response.use(
-  (res: AxiosResponse) => res,
-  async (error: AxiosError<ApiError>) => {
-    const originalRequest = error.config as InternalAxiosRequestConfig & {
-      _retry?: boolean;
-    };
-
-    // SKIP refresh logic for auth endpoints — let the 401 pass through
-    if (isAuthRequest(originalRequest)) {
-      return Promise.reject(error);
-    }
-
-    if (error.response?.status !== 401 || originalRequest._retry) {
-      return Promise.reject(error);
-    }
-
-    const refreshToken = tokenStore.getRefresh();
-    if (!refreshToken) {
-      tokenStore.clear();
-      window.location.href = "/signin";
-      return Promise.reject(error);
-    }
-
-    if (isRefreshing) {
-      return new Promise<string>((resolve, reject) => {
-        pendingQueue.push({ resolve, reject });
-      }).then((token) => {
-        if (originalRequest.headers) {
-          originalRequest.headers.Authorization = `Bearer ${token}`;
-        }
-        return api(originalRequest);
-      });
-    }
-
-    originalRequest._retry = true;
-    isRefreshing = true;
-
-    try {
-      const { data } = await axios.post<ApiResponse<AuthTokens>>(
-        `${env.API_BASE_URL}/v1/auth/refresh`,
-        { refreshToken }
-      );
-      const newTokens = data.data;
-      tokenStore.set(newTokens);
-      processQueue(null, newTokens.accessToken);
-
-      if (originalRequest.headers) {
-        originalRequest.headers.Authorization = `Bearer ${newTokens.accessToken}`;
-      }
-      return api(originalRequest);
-    } catch (refreshError) {
-      processQueue(refreshError, null);
-      tokenStore.clear();
-      window.location.href = "/signin";
-      return Promise.reject(refreshError);
-    } finally {
-      isRefreshing = false;
-    }
+function sendToSignin() {
+  tokenStore.clear();
+  if (!window.location.pathname.startsWith("/signin")) {
+    const back = encodeURIComponent(window.location.pathname + window.location.search);
+    window.location.href = `/signin?next=${back}`;
   }
-);
+}
+
+function attachRefresh(instance: AxiosInstance) {
+  instance.interceptors.response.use(
+    (res: AxiosResponse) => res,
+    async (error: AxiosError<ApiError>) => {
+      const original = error.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined;
+
+      // Not a 401, already retried, or an auth call itself: let it through
+      if (!original || error.response?.status !== 401 || original._retry || isAuthRequest(original)) {
+        return Promise.reject(error);
+      }
+      original._retry = true;
+
+      try {
+        const token = await refreshAccessToken();
+        original.headers = original.headers ?? {};
+        original.headers.Authorization = `Bearer ${token}`;
+        // Retry through the same client so its own interceptors still apply
+        return instance(original);
+      } catch {
+        sendToSignin();
+        return Promise.reject(error);
+      }
+    }
+  );
+}
+
+attachRefresh(api);
+attachRefresh(axios);
 
 /**
  * 402 handling. The backend returns 402 with data.code = TRIAL_EXPIRED or

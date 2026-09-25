@@ -1,4 +1,4 @@
-export type CampaignStatus = "upcoming" | "live" | "ended";
+export type CampaignStatus = "upcoming" | "live" | "ended" | "stopped";
 export type PostFormat = "reel" | "carousel" | "post" | "story";
 export type PostStage = "tease" | "explain" | "proof" | "convert";
 

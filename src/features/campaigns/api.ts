@@ -59,4 +59,25 @@ export const campaignsApi = {
             { headers: headers() },
         );
     },
+    // Scheduled -> Draft; keeps the time so it can be rescheduled
+    async unschedulePost(postId: string): Promise<void> {
+        await axios.post(`${BASE}/v1/posts/${postId}/unschedule`, {}, { headers: headers() });
+    },
+
+    // Drafts, scheduled and failed posts only; published ones are refused (409)
+    async deletePost(postId: string): Promise<void> {
+        await axios.delete(`${BASE}/v1/posts/${postId}`, { headers: headers() });
+    },
+
+    // Nothing else publishes; scheduled posts go back to Draft
+    async stopCampaign(id: string): Promise<{ unscheduled: number; stillPublishing: number }> {
+        const res = await axios.post(`${BASE}/v1/campaigns/${id}/stop`, {}, { headers: headers() });
+        return res.data.data;
+    },
+
+    // Deletes the campaign and its unpublished posts; published posts are kept
+    async deleteCampaign(id: string): Promise<{ deletedPosts: number; keptPublished: number }> {
+        const res = await axios.delete(`${BASE}/v1/campaigns/${id}`, { headers: headers() });
+        return res.data.data;
+    },
 };

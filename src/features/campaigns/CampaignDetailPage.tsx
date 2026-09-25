@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { campaignsApi, errorMessage } from "./api";
 import { draftsApi } from "@/features/drafts/api";
+import { refreshSidebarCounts } from "@/features/Calendar/useSidebarCounts";
 import type { CampaignDetail, CampaignPost } from "./types";
 
 type Filter = "all" | "needsWork" | "ready" | "scheduled" | "published";
@@ -16,16 +17,22 @@ const FILTERS: { key: Filter; label: string }[] = [
 
 const LABELS: Record<string, string> = {
     sales: "Sales", awareness: "Awareness", launch: "Launch a product", followers: "Grow followers",
-    live: "Live", upcoming: "Upcoming", ended: "Ended",
+    live: "Live", upcoming: "Upcoming", ended: "Ended", stopped: "Stopped",
     reel: "Reel", carousel: "Carousel", post: "Post", story: "Story",
     tease: "Tease", explain: "Explain", proof: "Proof", convert: "Convert",
 };
 
 const MIN_LEAD_MS = 5 * 60_000;
 
+// Sidebar badges, drafts count and calendar all listen for these
+const countsChanged = () => {
+    window.dispatchEvent(new Event("pk:drafts-changed"));
+    refreshSidebarCounts();
+};
+
 function bucket(p: CampaignPost): Exclude<Filter, "all"> {
     if (p.status === "PUBLISHED") return "published";
-    if (p.status === "SCHEDULED") return "scheduled";
+    if (p.status === "SCHEDULED" || p.status === "PUBLISHING") return "scheduled";
     return p.ready ? "ready" : "needsWork";
 }
 
@@ -62,6 +69,8 @@ function PostRow({
     const [time, setTime] = useState(planned ? toTimeInput(planned) : "");
     const [saving, setSaving] = useState(false);
     const [scheduling, setScheduling] = useState(false);
+    const [busy, setBusy] = useState<"unschedule" | "delete" | null>(null);
+    const publishing = post.status === "PUBLISHING";
 
     const chosen = date && time ? fromInputs(date, time) : null;
     const tooSoon = !!chosen && chosen.getTime() - Date.now() < MIN_LEAD_MS;
@@ -97,7 +106,7 @@ function PostRow({
         setScheduling(true);
         try {
             await draftsApi.schedule(post.id, chosen);
-            window.dispatchEvent(new Event("pk:drafts-changed"));
+            countsChanged();
             onNotice(`Scheduled "${post.title}" for ${fmt(chosen)}.`);
             await onChanged();
         } catch (err) {
@@ -105,6 +114,36 @@ function PostRow({
             setScheduling(false);
         }
     }
+
+    async function unschedule() {
+        setBusy("unschedule");
+        try {
+            await campaignsApi.unschedulePost(post.id);
+            countsChanged();
+            onNotice(`"${post.title}" is back in drafts. Its time is kept so you can reschedule it.`);
+            await onChanged();
+        } catch (err) {
+            onNotice(errorMessage(err, "Couldn't unschedule this post."), true);
+            setBusy(null);
+        }
+    }
+
+    async function remove() {
+        if (!window.confirm(`Delete "${post.title}"? This can't be undone.`)) return;
+        setBusy("delete");
+        try {
+            await campaignsApi.deletePost(post.id);
+            countsChanged();
+            onNotice(`Deleted "${post.title}".`);
+            await onChanged();
+        } catch (err) {
+            onNotice(errorMessage(err, "Couldn't delete this post."), true);
+            setBusy(null);
+        }
+    }
+
+    const quietBtn =
+        "border border-neutral-300 px-3 py-2 text-sm text-neutral-700 hover:border-black disabled:cursor-not-allowed disabled:opacity-40";
 
     const inputCls =
         "border border-neutral-300 bg-white px-2 py-1.5 text-sm text-black focus:border-black focus:outline-none disabled:bg-neutral-50";
@@ -145,6 +184,23 @@ function PostRow({
                 {!editable && planned && (
                     <p className="shrink-0 text-sm text-neutral-700">{fmt(planned)}</p>
                 )}
+
+                {b === "scheduled" && (
+                    <div className="flex shrink-0 gap-2">
+                        {publishing ? (
+                            <span className="text-sm text-neutral-500" role="status">Publishing now…</span>
+                        ) : (
+                            <>
+                                <button type="button" onClick={unschedule} disabled={busy !== null} className={quietBtn}>
+                                    {busy === "unschedule" ? "Unscheduling…" : "Unschedule"}
+                                </button>
+                                <button type="button" onClick={remove} disabled={busy !== null} className={`${quietBtn} hover:border-[#C8102E] hover:text-[#C8102E]`}>
+                                    {busy === "delete" ? "Deleting…" : "Delete"}
+                                </button>
+                            </>
+                        )}
+                    </div>
+                )}
             </div>
 
             {editable && (
@@ -180,6 +236,14 @@ function PostRow({
                     <div className="ml-auto flex gap-2">
                         <button
                             type="button"
+                            onClick={remove}
+                            disabled={busy !== null || scheduling}
+                            className={`${quietBtn} hover:border-[#C8102E] hover:text-[#C8102E]`}
+                        >
+                            {busy === "delete" ? "Deleting…" : "Delete"}
+                        </button>
+                        <button
+                            type="button"
                             onClick={() => navigate(`/create?draft=${post.id}`)}
                             className="border border-neutral-300 px-3 py-2 text-sm hover:border-black"
                         >
@@ -205,6 +269,8 @@ function PostRow({
 
 export default function CampaignDetailPage() {
     const { id = "" } = useParams();
+    const navigate = useNavigate();
+    const [campaignBusy, setCampaignBusy] = useState<"stop" | "delete" | null>(null);
     const [data, setData] = useState<CampaignDetail | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState<Filter>("all");
@@ -226,6 +292,46 @@ export default function CampaignDetailPage() {
         const t = setTimeout(() => setNotice(null), 5000);
         return () => clearTimeout(t);
     }, [notice]);
+
+    async function stopCampaign() {
+        if (!data) return;
+        const ok = window.confirm(
+            `Stop "${data.name}"?\n\nNothing else will be published. Scheduled posts go back to drafts, and posts already published stay up.`,
+        );
+        if (!ok) return;
+        setCampaignBusy("stop");
+        try {
+            const r = await campaignsApi.stopCampaign(data.id);
+            countsChanged();
+            const moved = r.unscheduled === 1 ? "1 post moved" : `${r.unscheduled} posts moved`;
+            const going = r.stillPublishing > 0
+                ? ` ${r.stillPublishing === 1 ? "1 post was" : `${r.stillPublishing} posts were`} already going out and will finish.`
+                : "";
+            setNotice({ text: `Campaign stopped. ${moved} back to drafts.${going}` });
+            await load();
+        } catch (err) {
+            setNotice({ text: errorMessage(err, "Couldn't stop this campaign."), bad: true });
+        } finally {
+            setCampaignBusy(null);
+        }
+    }
+
+    async function deleteCampaign() {
+        if (!data) return;
+        const ok = window.confirm(
+            `Delete "${data.name}"?\n\nIts unpublished posts are deleted too. Posts already published stay up and are kept in your history. This can't be undone.`,
+        );
+        if (!ok) return;
+        setCampaignBusy("delete");
+        try {
+            await campaignsApi.deleteCampaign(data.id);
+            countsChanged();
+            navigate("/campaigns", { replace: true });
+        } catch (err) {
+            setNotice({ text: errorMessage(err, "Couldn't delete this campaign."), bad: true });
+            setCampaignBusy(null);
+        }
+    }
 
     const weeks = useMemo(() => {
         if (!data) return [];
@@ -293,8 +399,32 @@ export default function CampaignDetailPage() {
                         {LABELS[data.status]}
                     </span>
                 </div>
-                <h1 className="mt-3 font-serif text-5xl text-black">{data.name}</h1>
-                <p className="mt-2 text-neutral-600 capitalize">{data.channels.join(", ")}</p>
+                <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                        <h1 className="font-serif text-5xl text-black">{data.name}</h1>
+                        <p className="mt-2 text-neutral-600 capitalize">{data.channels.join(", ")}</p>
+                    </div>
+                    <div className="flex gap-2">
+                        {(data.status === "live" || data.status === "upcoming") && (
+                            <button
+                                type="button"
+                                onClick={stopCampaign}
+                                disabled={campaignBusy !== null}
+                                className="border border-neutral-300 bg-white px-4 py-2 text-sm text-neutral-800 hover:border-black disabled:opacity-40"
+                            >
+                                {campaignBusy === "stop" ? "Stopping…" : "Stop campaign"}
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            onClick={deleteCampaign}
+                            disabled={campaignBusy !== null}
+                            className="border border-[#C8102E] bg-white px-4 py-2 text-sm text-[#C8102E] hover:bg-[#C8102E]/5 disabled:opacity-40"
+                        >
+                            {campaignBusy === "delete" ? "Deleting…" : "Delete campaign"}
+                        </button>
+                    </div>
+                </div>
             </header>
 
             <dl className="mt-8 grid border border-neutral-200 bg-white sm:grid-cols-3">
@@ -333,8 +463,8 @@ export default function CampaignDetailPage() {
                                     aria-pressed={filter === f.key}
                                     onClick={() => setFilter(f.key)}
                                     className={`border px-3 py-1.5 text-sm ${filter === f.key
-                                            ? "border-[#C8102E] bg-[#C8102E]/5 text-[#C8102E]"
-                                            : "border-neutral-300 text-neutral-700 hover:border-black"
+                                        ? "border-[#C8102E] bg-[#C8102E]/5 text-[#C8102E]"
+                                        : "border-neutral-300 text-neutral-700 hover:border-black"
                                         }`}
                                 >
                                     {f.label} <span className="opacity-60">{counts[f.key]}</span>

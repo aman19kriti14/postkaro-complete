@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus } from "lucide-react";
 import { flowApi, flowError } from "./flowApi";
+import { campaignsApi } from "./api";
+import { refreshSidebarCounts } from "@/features/Calendar/useSidebarCounts";
 import type { CampaignGroup, CampaignListItem } from "./flowApi";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -64,17 +66,33 @@ export default function CampaignsPage() {
     const [filter, setFilter] = useState<Filter>("ALL");
     const [sort, setSort] = useState<Sort>("newest");
     const [busyId, setBusyId] = useState<string | null>(null);
+    const [busyAction, setBusyAction] = useState<"duplicate" | "stop" | "delete" | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [notice, setNotice] = useState<string | null>(null);
 
-    useEffect(() => {
+    const load = () =>
         flowApi
             .overview()
             .then(setItems)
             .catch((err) => {
-                setItems([]);
+                setItems((prev) => prev ?? []);
                 setError(flowError(err, "Couldn't load campaigns"));
             });
+
+    useEffect(() => {
+        load();
     }, []);
+
+    useEffect(() => {
+        if (!notice) return;
+        const t = setTimeout(() => setNotice(null), 5000);
+        return () => clearTimeout(t);
+    }, [notice]);
+
+    const countsChanged = () => {
+        window.dispatchEvent(new Event("pk:drafts-changed"));
+        refreshSidebarCounts();
+    };
 
     const counts = useMemo(() => {
         const out: Record<Filter, number> = { ALL: 0, RUNNING: 0, UPCOMING: 0, UNFINISHED: 0, CLOSED: 0 };
@@ -104,6 +122,7 @@ export default function CampaignsPage() {
 
     async function duplicate(id: string) {
         setBusyId(id);
+        setBusyAction("duplicate");
         setError(null);
         try {
             const copy = await flowApi.duplicate(id);
@@ -111,6 +130,53 @@ export default function CampaignsPage() {
         } catch (err) {
             setError(flowError(err, "Couldn't duplicate this campaign"));
             setBusyId(null);
+            setBusyAction(null);
+        }
+    }
+
+    async function stop(c: CampaignListItem) {
+        const ok = window.confirm(
+            `Stop "${c.name}"?\n\nNothing else will be published. Scheduled posts go back to drafts, and posts already published stay up.`,
+        );
+        if (!ok) return;
+        setBusyId(c.id);
+        setBusyAction("stop");
+        setError(null);
+        try {
+            const r = await campaignsApi.stopCampaign(c.id);
+            countsChanged();
+            const moved = r.unscheduled === 1 ? "1 post moved" : `${r.unscheduled} posts moved`;
+            const going = r.stillPublishing > 0
+                ? ` ${r.stillPublishing === 1 ? "1 post was" : `${r.stillPublishing} posts were`} already going out and will finish.`
+                : "";
+            setNotice(`"${c.name}" stopped. ${moved} back to drafts.${going}`);
+            await load(); // it moves to Closed
+        } catch (err) {
+            setError(flowError(err, "Couldn't stop this campaign"));
+        } finally {
+            setBusyId(null);
+            setBusyAction(null);
+        }
+    }
+
+    async function remove(c: CampaignListItem) {
+        const ok = window.confirm(
+            `Delete "${c.name}"?\n\nIts unpublished posts are deleted too. Posts already published stay up and are kept in your history. This can't be undone.`,
+        );
+        if (!ok) return;
+        setBusyId(c.id);
+        setBusyAction("delete");
+        setError(null);
+        try {
+            await campaignsApi.deleteCampaign(c.id);
+            countsChanged();
+            setItems((prev) => (prev ?? []).filter((x) => x.id !== c.id));
+            setNotice(`"${c.name}" deleted.`);
+        } catch (err) {
+            setError(flowError(err, "Couldn't delete this campaign"));
+        } finally {
+            setBusyId(null);
+            setBusyAction(null);
         }
     }
 
@@ -159,8 +225,8 @@ export default function CampaignsPage() {
                         onClick={() => setFilter(f.key)}
                         aria-pressed={filter === f.key}
                         className={`border px-6 py-3 font-serif text-lg ${filter === f.key
-                                ? "border-[#C8102E] bg-[#C8102E]/5 text-[#C8102E]"
-                                : "border-neutral-300 text-neutral-700 hover:border-black"
+                            ? "border-[#C8102E] bg-[#C8102E]/5 text-[#C8102E]"
+                            : "border-neutral-300 text-neutral-700 hover:border-black"
                             }`}
                     >
                         {f.label}&nbsp;&nbsp;<span className="text-neutral-500">{counts[f.key]}</span>
@@ -171,6 +237,11 @@ export default function CampaignsPage() {
             {error && (
                 <p role="alert" className="mt-6 border-l-2 border-[#C8102E] bg-white px-4 py-3 text-sm text-black">
                     {error}
+                </p>
+            )}
+            {notice && (
+                <p role="status" className="mt-6 border-l-2 border-black bg-white px-4 py-3 text-sm text-black">
+                    {notice}
                 </p>
             )}
 
@@ -216,8 +287,8 @@ export default function CampaignsPage() {
                                             <h3 className="font-serif text-3xl text-black">{c.name}</h3>
                                             <span
                                                 className={`mt-3 inline-block border px-3 py-1 font-serif text-sm uppercase tracking-[0.15em] ${live
-                                                        ? "border-[#C8102E] text-[#C8102E]"
-                                                        : "border-neutral-300 text-neutral-600"
+                                                    ? "border-[#C8102E] text-[#C8102E]"
+                                                    : "border-neutral-300 text-neutral-600"
                                                     }`}
                                             >
                                                 {s.label}
@@ -285,7 +356,25 @@ export default function CampaignsPage() {
                                                 disabled={busyId !== null}
                                                 className={secondaryBtn}
                                             >
-                                                {busyId === c.id ? "Duplicating…" : "Duplicate"}
+                                                {busyId === c.id && busyAction === "duplicate" ? "Duplicating…" : "Duplicate"}
+                                            </button>
+                                            {(c.group === "RUNNING" || c.group === "UPCOMING") && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => stop(c)}
+                                                    disabled={busyId !== null}
+                                                    className={secondaryBtn}
+                                                >
+                                                    {busyId === c.id && busyAction === "stop" ? "Stopping…" : "Stop"}
+                                                </button>
+                                            )}
+                                            <button
+                                                type="button"
+                                                onClick={() => remove(c)}
+                                                disabled={busyId !== null}
+                                                className={`${secondaryBtn} hover:border-[#C8102E] hover:text-[#C8102E]`}
+                                            >
+                                                {busyId === c.id && busyAction === "delete" ? "Deleting…" : "Delete"}
                                             </button>
                                         </div>
                                     </article>

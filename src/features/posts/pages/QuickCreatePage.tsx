@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import { Loader2, RefreshCw, Sparkles, SlidersHorizontal } from "lucide-react";
+import { ImagePlus, Loader2, RefreshCw, Sparkles, SlidersHorizontal, X } from "lucide-react";
 import { type LanguageCode, LANGUAGES } from "./languages";
 
 const apiBase = import.meta.env.VITE_API_BASE_URL || "/api";
@@ -91,6 +91,13 @@ export function QuickCreatePage() {
     const [sending, setSending] = useState<"now" | "schedule" | null>(null);
     const [sendError, setSendError] = useState<string | null>(null);
 
+    // Own photo: used as is, or as the reference for an AI design
+    const [photo, setPhoto] = useState<string | null>(null);
+    const [photoMode, setPhotoMode] = useState<"design" | "asis">("design");
+    const [uploadingPhoto, setUploadingPhoto] = useState(false);
+    const [photoError, setPhotoError] = useState<string | null>(null);
+    const fileInput = useRef<HTMLInputElement>(null);
+
     useEffect(() => {
         axios
             .get(`${apiBase}/v1/auth/me`, { headers: auth() })
@@ -122,7 +129,8 @@ export function QuickCreatePage() {
     }
 
     const selectedChannels = channels.filter((c) => c.selected);
-    const busy = loadingCaptions || loadingImage;
+    const busy = loadingCaptions || loadingImage || uploadingPhoto;
+    const useAsIs = photo !== null && photoMode === "asis";
     const hasResult = captions.length > 0 || imageUrl !== null;
     const canSend = caption.trim() !== "" && selectedChannels.length > 0 && !busy && sending === null;
 
@@ -146,7 +154,43 @@ export function QuickCreatePage() {
         }
     }
 
+    async function handlePhoto(e: ChangeEvent<HTMLInputElement>) {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        if (!file) return;
+        if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+            setPhotoError("Upload a JPG, PNG or WebP photo.");
+            return;
+        }
+        setUploadingPhoto(true);
+        setPhotoError(null);
+        try {
+            const form = new FormData();
+            form.append("file", file);
+            form.append("kind", "media");
+            const res = await axios.post(`${apiBase}/v1/uploads`, form, { headers: auth(), timeout: 120_000 });
+            const body = res.data?.data ?? res.data;
+            setPhoto(body.url as string);
+        } catch (err) {
+            setPhotoError(errorMessage(err, "Couldn't upload that photo. Try again."));
+        } finally {
+            setUploadingPhoto(false);
+        }
+    }
+
+    function removePhoto() {
+        setPhoto(null);
+        setPhotoMode("design");
+        setPhotoError(null);
+    }
+
     async function generateImage() {
+        // "Use as is": no AI call, no credits
+        if (useAsIs) {
+            setImageError(null);
+            setImageUrl(photo);
+            return;
+        }
         setLoadingImage(true);
         setImageError(null);
         try {
@@ -158,7 +202,7 @@ export function QuickCreatePage() {
                     contentType: "product_promo",
                     aspectRatio: aspect,
                     language: langLabel,
-                    productImageUrls: [],
+                    productImageUrls: photo ? [photo] : [], // with a photo, AI designs around it
                     variations: 1,
                 },
                 { headers: auth(), timeout: 180_000 },
@@ -279,15 +323,74 @@ export function QuickCreatePage() {
                     className="w-full resize-none text-[15px] text-neutral-900 outline-none placeholder:text-neutral-400"
                 />
 
+                <input
+                    ref={fileInput}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={handlePhoto}
+                    className="hidden"
+                />
+
+                {(photo || uploadingPhoto) && (
+                    <div className="mt-3 flex flex-wrap items-center gap-4 rounded-lg bg-neutral-50 p-3">
+                        <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-md bg-neutral-200">
+                            {uploadingPhoto ? (
+                                <div className="flex h-full items-center justify-center">
+                                    <Loader2 className="h-4 w-4 animate-spin text-neutral-500" />
+                                </div>
+                            ) : (
+                                <>
+                                    <img src={photo!} alt="Your photo" className="h-full w-full object-cover" />
+                                    <button
+                                        onClick={removePhoto}
+                                        aria-label="Remove photo"
+                                        className="absolute right-0.5 top-0.5 rounded-full bg-black/60 p-0.5 text-white hover:bg-black"
+                                    >
+                                        <X className="h-3 w-3" />
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                        {!uploadingPhoto && (
+                            <div>
+                                <div className="flex flex-wrap gap-2">
+                                    <button onClick={() => setPhotoMode("design")} className={chip(photoMode === "design")}>
+                                        AI design with my photo
+                                    </button>
+                                    <button onClick={() => setPhotoMode("asis")} className={chip(photoMode === "asis")}>
+                                        Use my photo as is
+                                    </button>
+                                </div>
+                                <p className="mt-1.5 text-xs text-neutral-500">
+                                    {photoMode === "design"
+                                        ? "Keeps your product and builds a post around it."
+                                        : "Posts your photo unchanged. No image credits used."}
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                )}
+                {photoError && <p className="mt-2 text-sm text-[#C8102E]">{photoError}</p>}
+
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                    <button
-                        onClick={() => setShowOptions((v) => !v)}
-                        className="flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-900"
-                    >
-                        <SlidersHorizontal className="h-4 w-4" />
-                        {TONES.find((t) => t.value === tone)?.label} · {LANGUAGES.find((l) => l.code === language)?.label} ·{" "}
-                        {ASPECTS.find((a) => a.value === aspect)?.label}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-4">
+                        <button
+                            onClick={() => fileInput.current?.click()}
+                            disabled={busy}
+                            className="flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-900 disabled:opacity-40"
+                        >
+                            <ImagePlus className="h-4 w-4" />
+                            {photo ? "Change photo" : "Add your photo"}
+                        </button>
+                        <button
+                            onClick={() => setShowOptions((v) => !v)}
+                            className="flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-900"
+                        >
+                            <SlidersHorizontal className="h-4 w-4" />
+                            {TONES.find((t) => t.value === tone)?.label} · {LANGUAGES.find((l) => l.code === language)?.label} ·{" "}
+                            {ASPECTS.find((a) => a.value === aspect)?.label}
+                        </button>
+                    </div>
 
                     <button
                         onClick={handleCreate}
@@ -390,7 +493,7 @@ export function QuickCreatePage() {
                     <div>
                         <div className="mb-3 flex items-center justify-between">
                             <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-400">Image</p>
-                            {imageUrl && !loadingImage && (
+                            {imageUrl && !loadingImage && !useAsIs && (
                                 <button
                                     onClick={generateImage}
                                     className="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-900"
@@ -407,10 +510,16 @@ export function QuickCreatePage() {
                             {loadingImage && (
                                 <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-neutral-500">
                                     <Loader2 className="h-5 w-5 animate-spin" />
-                                    Making your image…
+                                    {photo ? "Designing around your photo…" : "Making your image…"}
                                 </div>
                             )}
-                            {!loadingImage && imageUrl && <img src={imageUrl} alt="" className="h-full w-full object-cover" />}
+                            {!loadingImage && imageUrl && (
+                                <img
+                                    src={imageUrl}
+                                    alt=""
+                                    className={`h-full w-full ${useAsIs && imageUrl === photo ? "object-contain" : "object-cover"}`}
+                                />
+                            )}
                             {!loadingImage && imageError && (
                                 <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-sm text-[#C8102E]">
                                     {imageError}
