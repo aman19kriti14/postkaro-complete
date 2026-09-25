@@ -3,7 +3,9 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { campaignsApi, errorMessage } from "./api";
 import { draftsApi } from "@/features/drafts/api";
 import { refreshSidebarCounts } from "@/features/Calendar/useSidebarCounts";
+
 import type { CampaignDetail, CampaignPost } from "./types";
+import { ConfirmOptions, useConfirm } from "../confirm-dialog/Confirmdialog";
 
 type Filter = "all" | "needsWork" | "ready" | "scheduled" | "published";
 
@@ -54,11 +56,12 @@ function rangeLabel(s: string, e: string) {
 
 /* One post row: its own date/time, saved as the planned slot, and Schedule */
 function PostRow({
-    post, onChanged, onNotice,
+    post, onChanged, onNotice, confirm,
 }: {
     post: CampaignPost;
     onChanged: () => Promise<void>;
     onNotice: (text: string, bad?: boolean) => void;
+    confirm: (opts: ConfirmOptions) => Promise<boolean>;
 }) {
     const navigate = useNavigate();
     const b = bucket(post);
@@ -129,7 +132,13 @@ function PostRow({
     }
 
     async function remove() {
-        if (!window.confirm(`Delete "${post.title}"? This can't be undone.`)) return;
+        const ok = await confirm({
+            title: `Delete “${post.title}”?`,
+            body: "This post and its visual are removed. This can't be undone.",
+            confirmLabel: "Delete post",
+            danger: true,
+        });
+        if (!ok) return;
         setBusy("delete");
         try {
             await campaignsApi.deletePost(post.id);
@@ -271,6 +280,7 @@ export default function CampaignDetailPage() {
     const { id = "" } = useParams();
     const navigate = useNavigate();
     const [campaignBusy, setCampaignBusy] = useState<"stop" | "delete" | null>(null);
+    const [confirm, confirmDialog] = useConfirm();
     const [data, setData] = useState<CampaignDetail | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState<Filter>("all");
@@ -295,9 +305,11 @@ export default function CampaignDetailPage() {
 
     async function stopCampaign() {
         if (!data) return;
-        const ok = window.confirm(
-            `Stop "${data.name}"?\n\nNothing else will be published. Scheduled posts go back to drafts, and posts already published stay up.`,
-        );
+        const ok = await confirm({
+            title: `Stop “${data.name}”?`,
+            body: "Nothing else will be published. Scheduled posts go back to drafts, and posts already published stay up.",
+            confirmLabel: "Stop campaign",
+        });
         if (!ok) return;
         setCampaignBusy("stop");
         try {
@@ -318,9 +330,12 @@ export default function CampaignDetailPage() {
 
     async function deleteCampaign() {
         if (!data) return;
-        const ok = window.confirm(
-            `Delete "${data.name}"?\n\nIts unpublished posts are deleted too. Posts already published stay up and are kept in your history. This can't be undone.`,
-        );
+        const ok = await confirm({
+            title: `Delete “${data.name}”?`,
+            body: "Its unpublished posts are deleted too. Posts already published stay up and are kept in your history. This can't be undone.",
+            confirmLabel: "Delete campaign",
+            danger: true,
+        });
         if (!ok) return;
         setCampaignBusy("delete");
         try {
@@ -445,11 +460,12 @@ export default function CampaignDetailPage() {
             {notice && (
                 <p
                     role="status"
-                    className={`mt-6 border-l-2 bg-white px-4 py-3 text-sm ${notice.bad ? "border-[#C8102E] text-[#C8102E]" : "border-black text-black"}`}
+                    className={`fixed inset-x-4 bottom-4 z-40 mx-auto max-w-md border-l-4 bg-white px-5 py-4 font-serif text-base shadow-lg ${notice.bad ? "border-[#C8102E] text-[#C8102E]" : "border-black text-black"}`}
                 >
                     {notice.text}
                 </p>
             )}
+            {confirmDialog}
 
             <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
                 <section className="border border-neutral-200 bg-white p-6 sm:p-8">
@@ -492,6 +508,7 @@ export default function CampaignDetailPage() {
                                         post={p}
                                         onChanged={load}
                                         onNotice={(text, bad) => setNotice({ text, bad })}
+                                        confirm={confirm}
                                     />
                                 ))}
                             </ul>

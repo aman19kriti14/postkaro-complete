@@ -4,7 +4,9 @@ import { Plus } from "lucide-react";
 import { flowApi, flowError } from "./flowApi";
 import { campaignsApi } from "./api";
 import { refreshSidebarCounts } from "@/features/Calendar/useSidebarCounts";
+
 import type { CampaignGroup, CampaignListItem } from "./flowApi";
+import { useConfirm } from "../confirm-dialog/Confirmdialog";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const PLATFORM_LABEL: Record<string, string> = {
@@ -69,6 +71,7 @@ export default function CampaignsPage() {
     const [busyAction, setBusyAction] = useState<"duplicate" | "stop" | "delete" | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
+    const [confirm, confirmDialog] = useConfirm();
 
     const load = () =>
         flowApi
@@ -135,9 +138,11 @@ export default function CampaignsPage() {
     }
 
     async function stop(c: CampaignListItem) {
-        const ok = window.confirm(
-            `Stop "${c.name}"?\n\nNothing else will be published. Scheduled posts go back to drafts, and posts already published stay up.`,
-        );
+        const ok = await confirm({
+            title: `Stop “${c.name}”?`,
+            body: "Nothing else will be published. Scheduled posts go back to drafts, and posts already published stay up.",
+            confirmLabel: "Stop campaign",
+        });
         if (!ok) return;
         setBusyId(c.id);
         setBusyAction("stop");
@@ -160,9 +165,12 @@ export default function CampaignsPage() {
     }
 
     async function remove(c: CampaignListItem) {
-        const ok = window.confirm(
-            `Delete "${c.name}"?\n\nIts unpublished posts are deleted too. Posts already published stay up and are kept in your history. This can't be undone.`,
-        );
+        const ok = await confirm({
+            title: `Delete “${c.name}”?`,
+            body: "Its unpublished posts are deleted too. Posts already published stay up and are kept in your history. This can't be undone.",
+            confirmLabel: "Delete campaign",
+            danger: true,
+        });
         if (!ok) return;
         setBusyId(c.id);
         setBusyAction("delete");
@@ -240,10 +248,11 @@ export default function CampaignsPage() {
                 </p>
             )}
             {notice && (
-                <p role="status" className="mt-6 border-l-2 border-black bg-white px-4 py-3 text-sm text-black">
+                <p role="status" className="fixed inset-x-4 bottom-4 z-40 mx-auto max-w-md border-l-4 bg-white px-5 py-4 font-serif text-base shadow-lg border-black text-black">
                     {notice}
                 </p>
             )}
+            {confirmDialog}
 
             {/* Lists */}
             {items === null ? (
